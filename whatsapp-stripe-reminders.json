@@ -1,0 +1,1734 @@
+{
+  "updatedAt": "2025-11-14T17:15:50.000Z",
+  "createdAt": "2025-10-10T12:38:50.057Z",
+  "id": "yyvGlxfysKDvGRBz",
+  "name": "WhatsApp Stripe Reminders",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1,
+      "position": [
+        -592,
+        224
+      ],
+      "id": "24e6a840-7d6a-4098-9fa6-286c866841f8",
+      "name": "think"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "demo@clobase.com",
+          "mode": "list",
+          "cachedResultName": "demo@clobase.com"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+        "additionalFields": {
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', 'The title/summary of this event should be in the format of \"{client_name}\" where `client_name` is the provided name of the client.', 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        -464,
+        224
+      ],
+      "id": "1d6811c1-803c-4965-b985-6986f0ae1625",
+      "name": "create_appointment",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "pEo0j76i748tabKL",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=ai-booking-agent-{{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}-r{{ $('SessionRev').item.json.rev }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -720,
+        224
+      ],
+      "id": "987fa6ed-40da-4509-8d4e-20838f35cd4a",
+      "name": "simple-memory"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.clobase.com/webhook/ebff3569-fc65-44fc-aad7-9254cf7ce269",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  timestamp: $fromAI('timestamp','ISO day anchor e.g. 2025-09-02T00:00:00','string') || $json.body?.timestamp,\n  timezone:  $fromAI('timezone','IANA timezone','string') || 'Europe/London',\n  slotMinutes: Number($fromAI('slotMinutes','minutes per slot','number') ?? 30),\n  stepMinutes: Number($fromAI('stepMinutes','slot step in minutes','number') ?? 30),\n  calendarIds: Array.isArray($json.body?.calendarIds) ? $json.body.calendarIds : ['jobs@turexy.com']\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -304,
+        224
+      ],
+      "id": "51960012-0b2d-470f-8192-bf61412eeb6f",
+      "name": "get_availability"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-nano",
+          "mode": "list",
+          "cachedResultName": "gpt-5-nano"
+        },
+        "options": {
+          "reasoningEffort": "medium"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        224
+      ],
+      "id": "995d4994-5236-4076-9dda-5db176baef52",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "Hj3yd6iSfl3uprM4",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('sysFilter').item.json.messages[0].text.body }}",
+        "options": {
+          "systemMessage": "=# Role and Objective\n\nYou are \"Alex\", the efficient, friendly, and professional appointment scheduling assistant for Max's barber shop, \"Short, Back & Vibes\". Your sole function is to book appointments; you cannot cancel or reschedule. Focus on quickly and politely finding a suitable appointment slot for each client. Yo need to think before and after running each tool, you need to verify you have all the data required before responding to the client.\n\n\n# Operating Hours\n- Monday: Closed\n- Tuesday - Wednesday: 10:00am – 07:00pm\n- Thursday – Friday: 10:00am – 08:00pm\n- Saturday: 10:00am – 06:00 pm\n- Sunday: 11:00am – 04:00pm\n- Current date/time: {{$now}}\nMention the shop's opening hours only if the client asks.\n\n# Tone\n- Maintain a clear, concise, and professional style. Use a warm, friendly, and reassuring manner to build trust.\n- Don't over use client's name, use it during greeting and once again when te booking is confirmed.\n\n# Goal\nFollow the \"Core Workflow\" each step in turn, don't skip any steps to schedule client appointments efficiently. Failing that, your job will be considered as a failure!\n\n## Core Workflow\n1. **Verify if client exists in our Phone Book\"\n- Before first reply to the client you must run \"checkNumber\" tool.\n- Use \"checkNumber\" tool to check if the number defined as {{ $('sysFilter').item.json.contacts[0].wa_id }} exists in the Phone Book\nif number exists  > Greet client with client's name pulled from the phone book\nif name is not returned > Say something like: \n\n\"Hi and welcome to Short, Back & Vibes, it looks like we don't have your number in our phone book. Please let me know your first name and then we can move onto booking\" and use \"saveNumber\" tool to save client's name and phone number to the Phone Book.\n- If client uses lower or upper case letters always standarise the name by using only first capital letter and all the rest lower case letters\nExamples:\nBAD: \"THOMAS\"\nBAD: \"THomas\"\nBAD: \"thomas\"\nGOOD: \"Thomas\"\n- Do not offer or ask about booking at this stage we will do it later!\n\n2. **Determine Intent**\n- If greeted, respond warmly and ask if they'd like to book an appointment.\n- If the client wants to schedule, proceed to Step 3. \"Ask for Preferred Day & Use Availability Tool\"\n- For any other query, respond: \"This chat is solely for booking appointments. For other queries, please contact Max on 07765 918355.\" Only use this if not booking.\n- Do not offer a date until you have the client’s name.\n\n3. **Ask for Preferred Day & Use Availability Tool**\n  1. Ask if they have a preferred day of the week: \"Do you already have a day that would work best for your visit?\"\n  2. The appointment can only be booked five days in advance from {{$now}}. You shoud explain this politely if client tries to book an appointment more than 5 days ahead.\n  3. When provided (e.g., \"next Tuesday\"), convert to ISO format for that day’s start time and call `get_availability({ \"appointmentDateTime\": \"<ISO-timestamp>\" })`.\n  4. For requests like \"as soon as possible\":\n    - Check if the request is being made during working hours\n      if yes - check for today appointment\n      if not - check for next working day appointments\n  5. If client says \"tomorrow morning\" - check available slots the following day and present only AM slots if available.\n  6. 'get_availability' tool should return up to four possible slots, two AM and tow PM\n    - Example:\nAM:\nstartZ:2025-10-10T08:00:00.000Z\nendZ:2025-10-10T08:30:00.000Z\nstartLocal:2025-10-10T09:00:00\nendLocal:2025-10-10T09:30:00\ntimezone:Europe/London\n\nPM:\nstartZ:2025-10-10T13:30:00.000Z\nendZ:2025-10-10T14:00:00.000Z\nstartLocal:2025-10-10T14:30:00\nendLocal:2025-10-10T15:00:00\ntimezone:Europe/London\n\n  7. Present all available times returned by get_availability in easy to read format: \n  - Example:\n    \"Great, I have several times available on \n    [date]: [time]\n    [date]: [time]\n    ...\n    [date]: [time]\n    [date]: [time]\"\n  8. Ask which time they prefer.\n  9. After their selection, proceed to Step 4. \"Pull Product List\"\n\n4. **Pull Product List**\n- Use `getProductList` and format the JSON response as a WhatsApp-friendly table:\n`<name> - <amount>` (e.g., Standard haircut - £16.50)\n- \"amount\" is in pence; format as £16.50 for 1650.\n- Ask which product the client which service he/she would like to book.\n- As soon as client chooses the service move to step 5. \"Create Payment Link\"\n\n5. **Create Payment Link**\n- Use must use `createPaymentLink` (only once per booking) to generate the payment URL.\n- Present the link: \"We are nearly there, please complete the payment for the <product> so I can finalise the booking... `url` Let me know once this is completed so I can verify the payment and complete the booking.\"\n- Do NOT imply the booking is complete before confirmation.\n- This step is very important as it makes sure payment is made for the service so make sure the link is included in your reply!\n\n6. **Confirm and Book Appointment**\n- Once payment is confirmed and time is chosen, use `create_appointment(start_timestamp, client_name)`.\n- Both name and date/time are required at this stage.\n\n7. **Provide Final Confirmation**\n- Confirm the booking: \"You're all set for your appointment.\" (Do not mention the year.)\n\n8. **Save the appointment in google sheet**\n- Use \"logAppointment\" tool to log all the data you collected during booking process, you will need:\n-- Client_ID from the Phone Book\n-- Request_Date which is current date and time\n-- Appointment_Date and time the client has chosen (do not include \"+01:00\" if it exists)\n-- Service_Name the client has chosen\n-- Payment_Confirmation\n\n## Guardrails\n- Do not include your reasoning, validation, thought process or timezone (Europe/London) in replies to clients; client-facing responses must be concise and focused.\n- saveNumber can be only run if client does not exists in the phone book, if not sure run \"checkNumber\" tool to check.\n- For all non-scheduling queries, provide Max's mobile: 07765 918355.\n- Never imply a booking is completed before Step 7.\n- If client at any point replies \"!!reset\"; politely acknowledge and say: \"New session has been created\"\n\n## Price List and Service List\nIf requested, provide a price list or service list using `getProductList` and formatting it as a WhatsApp-friendly table:\n`<name> - <amount>` (e.g., Standard haircut - £16.50)\nFormat \"amount\" as £16.50 for 1650.\n\n## Tools\n- **`checkNumber`**: Returns name and number if contact exists in Phone Book\n- Args: `{ \"wa_id\": \"client_number\" }\n- **`saveNumber`**: Saves client details into Phone Book\n- **`get_availability`**: Returns available times for a given date.\n- Args: `{ \"appointmentDateTime\": \"YYYY-MM-DDTHH:MM:SS\" }`\n- Returns: `{ \"availableSlots\": [\"YYYY-MM-DDTHH:MM:SS\", ...] }`\n- **`create_appointment`**: Creates a 30-minute appointment.\n- Args: `{ \"start_timestamp\": ISO-string, \"client_name\": string }`\n- **`getProductList`**: Retrieves the latest product list as JSON.\n- **`createPaymentLink`**: Generates a payment URL for the client’s selected product.\n- Args: `{ \"priceId\": \"price_1SFx...\" }`\n- Returns: `{ \"url\": \"https://buy.stripe.com/...\" }\" \n- **`logAppointment`**: Saves appointment details"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        0
+      ],
+      "id": "b56d5c7b-fd80-4f4f-b85c-78ecaefbe61a",
+      "name": "booking_agent"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        16
+      ],
+      "id": "c504cdd5-d8bd-429b-a16a-83c964174b37",
+      "name": "WhatsApp Trigger",
+      "webhookId": "6bac1440-1386-4512-b245-4a2a66076956",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "5ijFpY1aZuX1qK9B",
+          "name": "WhatsApp Clobase Listener"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "859934767194595",
+        "recipientPhoneNumber": "={{ $('WhatsApp Trigger').item.json.messages[0].from }}",
+        "textBody": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        560,
+        0
+      ],
+      "id": "c234aebb-8cfd-4841-8c4f-74bfb9009b6b",
+      "name": "Send message",
+      "webhookId": "965f5cc2-2eb9-472a-99c1-21d3c254fd54",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "0YTF49b8d0TZKWcy",
+          "name": "WhatsApp reply 07304 494554"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/products",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "options": {}
+      },
+      "id": "f1bb6123-235d-4c42-b142-4c5cfcf63161",
+      "name": "HTTP - Get Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -832,
+        928
+      ],
+      "credentials": {
+        "stripeApi": {
+          "id": "38FMppwLnvApBK6j",
+          "name": "Stripe account (service@clobase.com)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "productId",
+              "stringValue": "={{ $json.id }}"
+            },
+            {
+              "name": "name",
+              "stringValue": "={{ $json.name }}"
+            },
+            {
+              "name": "default_price",
+              "stringValue": "={{ $json.default_price }}"
+            }
+          ]
+        },
+        "include": "selected",
+        "options": {}
+      },
+      "id": "b6b39b8f-25ef-4c41-84cf-d15f11d6c37a",
+      "name": "Set - Keep Product Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        -384,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/prices",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "product",
+              "value": "={{ $json.productId }}"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "d18f1887-852d-4f5f-a5cb-e08b7123465d",
+      "name": "HTTP - Get Prices (by product)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -208,
+        800
+      ],
+      "credentials": {
+        "stripeApi": {
+          "id": "38FMppwLnvApBK6j",
+          "name": "Stripe account (service@clobase.com)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "productId",
+              "stringValue": "={{ $json.productId }}"
+            },
+            {
+              "name": "name",
+              "stringValue": "={{ $json.name }}"
+            },
+            {
+              "name": "priceId",
+              "stringValue": "={{ $json.prices.data[0].id }}"
+            },
+            {
+              "name": "currency",
+              "stringValue": "={{ $json.prices.data[0].currency }}"
+            },
+            {
+              "name": "type",
+              "stringValue": "={{ $json.prices.data[0].type }}"
+            },
+            {
+              "name": "recurring_interval",
+              "stringValue": "={{ $json.prices.data[0].recurring }}"
+            },
+            {
+              "name": "amount",
+              "stringValue": "={{ $json.prices.data[0].unit_amount }}"
+            },
+            {
+              "name": "active",
+              "stringValue": "={{ $json.prices.data[0].active }}"
+            }
+          ]
+        },
+        "include": "selected",
+        "options": {}
+      },
+      "id": "cdf5aaa0-7e2c-4898-9d23-73fbbc222d64",
+      "name": "Set - Flatten Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        480,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        320,
+        912
+      ],
+      "id": "f8d86a63-5cce-4b50-b3fe-1801d525e0cb",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -32,
+        912
+      ],
+      "id": "66068539-fed1-4ec9-b21c-213a246a1ff5",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        928
+      ],
+      "id": "e32b58de-5c3d-4b33-9a4b-1eaa5b624fe3",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "content": "## Get products and prices from Stripe",
+        "height": 304,
+        "width": 1920
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1072,
+        784
+      ],
+      "id": "e80d805a-8975-4a46-9ebb-b20f63d4ce38",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "path": "cae427b3-9a3f-4466-8637-27fa75f6dcca",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1008,
+        928
+      ],
+      "id": "1bab85fe-5868-4ea5-8945-b494adff155f",
+      "name": "Webhook",
+      "webhookId": "cae427b3-9a3f-4466-8637-27fa75f6dcca"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        656,
+        912
+      ],
+      "id": "272465db-e544-4dfa-aa03-060a449474d9",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Queries product list from Stripe",
+        "url": "https://n8n.clobase.com/webhook/cae427b3-9a3f-4466-8637-27fa75f6dcca",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        224
+      ],
+      "id": "e251dd50-7561-4fc6-af71-79999c9ed5f7",
+      "name": "getProductList"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input expected on $json:\n// { slots: [ {startZ:\"...\", endZ:\"...\"}, ... ], timezone: \"Europe/London\" }\n\nconst slots = Array.isArray($json.slots) ? $json.slots.slice() : [];\nconst tz = $json.timezone || 'Europe/London';\n\n// nothing to do\nif (!slots.length) {\n  return [{ json: { available: false, reason: 'no_slots_for_day' } }];\n}\n\n// sort by start time (UTC)\nslots.sort((a, b) => new Date(a.startZ) - new Date(b.startZ));\n\n// helper: local hour in given zone\nfunction localHour(iso, zone) {\n  return Number(new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso)));\n}\n\n// helper: build local ISO like 2025-09-01T09:30:00 (no offset, use with timeZone later)\nfunction toLocalISO(iso, zone) {\n  const d = new Date(iso);\n  const datePart = new Intl.DateTimeFormat('en-CA', { // en-CA => YYYY-MM-DD\n    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(d);\n  const timePart = new Intl.DateTimeFormat('en-GB', {\n    timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,\n  }).format(d);\n  return `${datePart}T${timePart}`;\n}\n\n// split into AM (<12) and PM (>=12) by local start time\nconst am = [];\nconst pm = [];\nfor (const s of slots) {\n  const h = localHour(s.startZ, tz);\n  (h < 12 ? am : pm).push(s);\n}\n\n// choose up to two AM and two PM slots\nconst chosen = [...am.slice(0, 2), ...pm.slice(0, 2)];\n\n// if still nothing, return unavailable\nif (!chosen.length) {\n  return [{ json: { available: false, reason: 'no_slots_after_filters' } }];\n}\n\n// enrich with local times for direct use in Calendar (local dt + separate timeZone)\nconst proposals = chosen.map(s => ({\n  ...s,\n  startLocal: toLocalISO(s.startZ, tz),\n  endLocal:   toLocalISO(s.endZ,   tz),\n  timezone:   tz,\n}));\n\nreturn [{\n  json: {\n    available: true,\n    selectedSlots: proposals,      // up to 4 items (2 AM + 2 PM)\n    counts: { am: am.length, pm: pm.length }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        496
+      ],
+      "id": "b5558f86-140e-4210-9aa6-4db92b8dff1d",
+      "name": "pickFirstSlot"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect TWO upstream items: one \"config\" (windowStart/windowEnd/slotMinutes/stepMinutes/...)\n// and one \"freebusy\" (calendars: { <id>: { busy: [{start,end},...] } })\n\n// 1) Find config + freebusy items\nlet cfg = null, fb = null;\nfor (const it of items) {\n  const j = it.json || {};\n  if (!cfg && j.windowStart && j.windowEnd) cfg = j;\n  if (!fb && j.calendars) fb = j;\n}\nif (!cfg) throw new Error(\"Config item missing windowStart/windowEnd\");\nif (!fb || !fb.calendars) throw new Error(\"FreeBusy item missing calendars\");\n\n// helpers\nfunction toMs(iso){ const t = Date.parse(iso); if (Number.isNaN(t)) throw new Error(\"Bad ISO: \"+iso); return t; }\nfunction localHM(iso, zone) {\n  const s = new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso));\n  const [h,m] = s.split(':').map(Number);\n  return h*60 + m;\n}\nfunction localWeekday(iso, zone) {\n  return new Intl.DateTimeFormat('en-GB', { weekday: 'long', timeZone: zone })\n    .format(new Date(iso)); // e.g. \"Tuesday\"\n}\n\n// Map business hours (minutes since midnight). null => closed.\nfunction getBusinessWindow(weekday) {\n  switch (weekday) {\n    case 'Monday':    return null;                  // closed\n    case 'Tuesday':\n    case 'Wednesday': return { open: 10*60, close: 19*60 }; // 10:00–19:00\n    case 'Thursday':\n    case 'Friday':    return { open: 10*60, close: 20*60 }; // 10:00–20:00\n    case 'Saturday':  return { open: 10*60, close: 18*60 }; // 10:00–18:00\n    case 'Sunday':    return { open: 11*60, close: 16*60 }; // 11:00–16:00\n    default:          return null;\n  }\n}\n\n// 2) Read config\nconst tz          = cfg.timezone || 'Europe/London';\nconst windowStart = toMs(cfg.windowStart);\nconst windowEnd   = toMs(cfg.windowEnd);\nconst slotMs      = (Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst stepMs      = (Number(cfg.stepMinutes) || Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst bufBeforeMs = (Number(cfg.bufferBeforeMinutes) || 0) * 60 * 1000;\nconst bufAfterMs  = (Number(cfg.bufferAfterMinutes)  || 0) * 60 * 1000;\n\n// 3) Collect busy intervals across all calendars\nlet intervals = [];\nfor (const [id, cal] of Object.entries(fb.calendars)) {\n  if (!cal || (cal.errors && cal.errors.length)) continue;\n  const busy = Array.isArray(cal.busy) ? cal.busy : [];\n  for (const b of busy) {\n    let s = toMs(b.start) - bufBeforeMs;\n    let e = toMs(b.end)   + bufAfterMs;\n    if (e <= windowStart || s >= windowEnd) continue;   // outside day window\n    if (s < windowStart) s = windowStart;\n    if (e > windowEnd)   e = windowEnd;\n    intervals.push([s, e]);\n  }\n}\nintervals.sort((a,b) => a[0] - b[0]);\n\n// 4) Merge overlaps\nconst merged = [];\nfor (const iv of intervals) {\n  if (!merged.length || iv[0] > merged[merged.length-1][1]) merged.push([iv[0], iv[1]]);\n  else if (iv[1] > merged[merged.length-1][1]) merged[merged.length-1][1] = iv[1];\n}\n\n// 5) Free ranges = window - merged busy\nconst freeRanges = [];\nlet cursor = windowStart;\nfor (const [s,e] of merged) {\n  if (cursor < s) freeRanges.push([cursor, s]);\n  if (e > cursor) cursor = e;\n}\nif (cursor < windowEnd) freeRanges.push([cursor, windowEnd]);\n\n// 6) Slice free ranges into slots (UTC) — enforce \"no past\" and \">= now + 1h\"\nfunction ceilToStep(t){ const r = (t - windowStart) % stepMs; return r === 0 ? t : t + (stepMs - r); }\nconst nowMs = Date.now();\nconst minStart = Math.max(windowStart, nowMs + 60 * 60 * 1000); // >= current time + 1h\n\nlet slots = [];\nfor (const [fs,fe] of freeRanges) {\n  const effectiveStart = Math.max(fs, minStart);\n  if (effectiveStart >= fe) continue;\n\n  let t = ceilToStep(effectiveStart);\n  while (t + slotMs <= fe) {\n    slots.push({\n      startZ: new Date(t).toISOString(),\n      endZ:   new Date(t + slotMs).toISOString()\n    });\n    t += stepMs;\n  }\n}\n\n// 7) FILTER to business hours for the day (in tz)\nconst weekday = localWeekday(cfg.windowStart, tz);\nconst biz = getBusinessWindow(weekday);\n\n// If closed, wipe slots.\nif (!biz) slots = [];\nelse {\n  slots = slots.filter(s => {\n    const startHM = localHM(s.startZ, tz);\n    const endHM   = localHM(s.endZ,   tz);\n    return startHM >= biz.open && endHM <= biz.close;\n  });\n}\n\n// 8) Output (plus some debug)\nconst toZ = ([s,e]) => ({ startZ: new Date(s).toISOString(), endZ: new Date(e).toISOString() });\n\nreturn [{\n  json: {\n    slots,\n    debug: {\n      timezone: tz,\n      weekday,\n      businessWindowMinutes: biz || null,\n      windowStartZ: new Date(windowStart).toISOString(),\n      windowEndZ:   new Date(windowEnd).toISOString(),\n      mergedBusy:   merged.map(toZ),\n      freeRanges:   freeRanges.map(toZ),\n      minStartZ:    new Date(minStart).toISOString(),\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        496
+      ],
+      "id": "f8c1c92c-fde3-4a57-a671-323b15ae3276",
+      "name": "getAllSlotsForTheDay"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  timeMin: $node[\"Config\"].json.windowStart,\n  timeMax: $node[\"Config\"].json.windowEnd,\n  timeZone: $node[\"Config\"].json.timezone,\n  items: $node[\"Config\"].json.calendarIds.map(id => ({ id }))\n}) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        576
+      ],
+      "id": "4b8636be-49e6-435d-99bf-3652fcd418b5",
+      "name": "FreeBusy",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bCgeKmyn9b1BZgTp",
+          "name": "Unnamed credential"
+        },
+        "googleOAuth2Api": {
+          "id": "jMGCrDX8pBYUuzg2",
+          "name": "Google account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cd5b085c-7436-46fb-8bd5-aa0d52e965d2",
+              "name": "timezone",
+              "value": "={{ $json.timezone || 'Europe/London' }}",
+              "type": "string"
+            },
+            {
+              "id": "ff51dc5e-3094-4db9-aa39-7da0987cc3c8",
+              "name": "slotMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "091d9d63-9f47-446e-9798-2d871e74ba81",
+              "name": "stepMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "ee4c98c6-2117-4228-9756-a6c1abc6c7ee",
+              "name": "bufferBeforeMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "2ffc85a8-aeb9-440b-b8dc-1102746abef3",
+              "name": "bufferAfterMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "cac063a9-6a5e-40e2-bc97-25e7f720c4f0",
+              "name": "calendarIds",
+              "value": "=[\"demo@clobase.com\"]",
+              "type": "array"
+            },
+            {
+              "id": "448b1372-b153-4a4b-b761-9019f5b41add",
+              "name": "windowStart",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,                              // <-- read from body\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.startHour ?? 10), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "56ec02c4-69d8-4697-8229-5f2fc3cd0615",
+              "name": "windowEnd",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.endHour ?? 19), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "143b7abf-f257-4d34-8b64-59a8f003cc42",
+              "name": "startHour",
+              "value": "={{ ($json.workday && $json.workday.startHour) || 9 }}",
+              "type": "number"
+            },
+            {
+              "id": "bf63f4f1-c843-49fa-984d-19260e9d4f6b",
+              "name": "endHour",
+              "value": "={{ ($json.workday && $json.workday.endHour) || 18 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -688,
+        480
+      ],
+      "id": "47034642-afa5-4dea-b3f9-12b5738ce648",
+      "name": "Config"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ebff3569-fc65-44fc-aad7-9254cf7ce269",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -912,
+        480
+      ],
+      "id": "61cc02b8-a14a-4e14-a134-bb190d384e94",
+      "name": "getFreeSlot",
+      "webhookId": "ebff3569-fc65-44fc-aad7-9254cf7ce269"
+    },
+    {
+      "parameters": {
+        "content": "## Get Available Slots",
+        "height": 336,
+        "width": 1584,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        400
+      ],
+      "id": "97656bf9-fb39-42c1-987b-c89f03e0e4df",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "config",
+              "field2": "FreeBusy"
+            }
+          ]
+        },
+        "joinMode": "keepNonMatches",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -240,
+        496
+      ],
+      "id": "a7bf6c44-c36e-438e-994e-0bd3bf35941f",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({\n  availableSlots: ($json.selectedSlots || []).map(s => s.startLocal),\n  timezone: ($json.selectedSlots && $json.selectedSlots.length > 0)\n    ? $json.selectedSlots[0].timezone\n    : ($json.timezone || 'UTC')\n}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        432,
+        496
+      ],
+      "id": "f877e776-f6f1-4193-9a67-1c46225a6f5a",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  ...$json,\n  prices: $json\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        912
+      ],
+      "id": "b62c107c-629e-4c3a-bbad-64f8c56a9e71",
+      "name": "Merge Products with Prices"
+    },
+    {
+      "parameters": {
+        "jsCode": "// items[0].json looks like { object: 'list', data: [ ...products ] }\nconst list = items[0].json;\n\n// get all products\nconst products = list.data || [];\n\n// filter only active products and reverse them\nconst filteredAndReversed = products\n  .filter(p => p.active === true)\n  .reverse();\n\n// update the data array with filtered results\nlist.data = filteredAndReversed;\n\n// return the same single item with filtered + reversed data\nreturn [{ json: list }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        928
+      ],
+      "id": "5fa257f4-3ad4-42f8-a468-55922e3cc157",
+      "name": "Reverse List"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Creates Stripe payment link",
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/payment_links",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "line_items[0][price]",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', `priceid obtained when client chose product`, 'string') }}"
+            },
+            {
+              "name": "line_items[0][quantity]",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        224
+      ],
+      "id": "9b8ea48f-e491-4923-8fd0-e3b7524de225",
+      "name": "createPaymentLink",
+      "credentials": {
+        "stripeApi": {
+          "id": "38FMppwLnvApBK6j",
+          "name": "Stripe account (service@clobase.com)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Main flow\n",
+        "height": 400,
+        "width": 1680,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        -32
+      ],
+      "id": "1eb4c9fe-6a4b-4dac-915f-d7bee2b19686",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -608,
+        1216
+      ],
+      "id": "cf35fc0a-31d7-4975-8a9e-d9da35c50d41",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "/***** SETTINGS *****/\nconst TZ = 'Europe/London';\nconst SEND_WINDOW_MIN = 15;   // should be >= your schedule cadence\nconst DRY_RUN = false;        // true = only diagnostics, no messages\n\n/***** HELPERS: TZ math (no external libs) *****/\nfunction tzOffsetMs(tz, dateUtc) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false,\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);\n  return asUtc - dateUtc.getTime();\n}\n\nfunction zonedTimeToUtc(y, m, d, hh, mm, ss, tz) {\n  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm, ss || 0));\n  const off = tzOffsetMs(tz, guess);\n  return guess.getTime() - off;\n}\n\nfunction parseLocalDateTimeToUTCms(str, tz) {\n  if (!str) return null;\n  const s = String(str).trim().replace('T', ' ');\n  // yyyy-mm-dd hh:mm[:ss]\n  const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})(?::(\\d{2}))?$/);\n  if (!m) return null;\n  const [, Y, Mo, D, h, mi, se] = m.map(Number);\n  return zonedTimeToUtc(Y, Mo, D, h, mi, se || 0, tz);\n}\n\nfunction localYMD(dateUtc, tz) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  return { y: +p.year, m: +p.month, d: +p.day };\n}\n\nfunction sameDay8amUtcMs(apptUtcMs, tz) {\n  const { y, m, d } = localYMD(new Date(apptUtcMs), tz);\n  return zonedTimeToUtc(y, m, d, 8, 0, 0, tz);\n}\n\n/***** HELPERS: phone cleaning *****/\nfunction cleanPhone(x) {\n  // Turn anything into digits-only string\n  const digits = String(x ?? '').match(/\\d+/g)?.join('') || '';\n  if (!digits) return ''; // will fail fast downstream if empty\n  // If UK and number doesn't start with 44, add it (strip leading 0s)\n  const withCc = digits.startsWith('44') ? digits : ('44' + digits.replace(/^0+/, ''));\n  return withCc; // WhatsApp BC accepts digits-only (E.164 without '+')\n}\n\n/***** NOW & FORMATTING *****/\nconst nowMs = Date.now();\nconst windowStartMs = nowMs - SEND_WINDOW_MIN * 60 * 1000;\nconst windowEndMs   = nowMs + 60 * 1000; // small lookahead\nconst dateFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: TZ, dateStyle: 'medium', timeStyle: 'short', hour12: false\n});\nconst isoUtc = (ms) => new Date(ms).toISOString();\n\n/***** PROCESS ROWS *****/\nconst out = [];\n\nfor (const item of items) {\n  const r = item.json;\n\n  // Expected headers in your \"October\" sheet:\n  // Name | Number | Request Date | Appointment | Service | Paid | Client ID\n  const name     = r['Name'] || '';\n  const rawPhone = r['Number'];\n  const apptStr  = r['Appointment'];   // \"YYYY-MM-DD HH:MM[:SS]\" or \"YYYY-MM-DDTHH:MM[:SS]\"\n  const service  = r['Service'] || '';\n  const clientId = r['Client ID'] || '';\n\n  if (!apptStr || !rawPhone) continue;\n\n  const apptMs = parseLocalDateTimeToUTCms(apptStr, TZ);\n  if (!apptMs) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad date format', apptStr } });\n    continue;\n  }\n\n  const to = cleanPhone(rawPhone);\n  if (!to) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad phone', rawPhone } });\n    continue;\n  }\n\n  const sendAt08Ms = sameDay8amUtcMs(apptMs, TZ);\n  const sendAt1hMs = apptMs - 60 * 60 * 1000;\n  const inWindow = (t) => t >= windowStartMs && t <= windowEndMs;\n\n  if (DRY_RUN) {\n    out.push({\n      json: {\n        diagnostics: true,\n        name, clientId, service, to,\n        nowUtc: isoUtc(nowMs),\n        apptLocal: dateFmt.format(new Date(apptMs)),\n        sendAt08_local: dateFmt.format(new Date(sendAt08Ms)),\n        sendAt08_utc: isoUtc(sendAt08Ms),\n        sendAt1h_local: dateFmt.format(new Date(sendAt1hMs)),\n        sendAt1h_utc: isoUtc(sendAt1hMs),\n        windowStartUtc: isoUtc(windowStartMs),\n        windowEndUtc: isoUtc(windowEndMs),\n        shouldSend08: inWindow(sendAt08Ms),\n        shouldSend1h: inWindow(sendAt1hMs),\n      }\n    });\n    continue;\n  }\n\n  // 08:00 morning reminder\n  if (inWindow(sendAt08Ms)) {\n    out.push({\n      json: {\n        to, name, clientId, type: '08am',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Good morning ${name || ''}! Reminder: your appointment is today at ${dateFmt.format(new Date(apptMs))}. Service: ${service || '—'}. Phone Max on 07765 918355 if you need to re-schedule.`\n      }\n    });\n  }\n\n  // 1-hour-before reminder\n  if (inWindow(sendAt1hMs)) {\n    const timeOnlyFmt = new Intl.DateTimeFormat('en-GB', {\n      timeZone: TZ,\n      hour: '2-digit',\n      minute: '2-digit',\n      hour12: false\n    });\n\n    out.push({\n      json: {\n        to, name, clientId, type: '1h-before',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Hi ${name || ''}, quick reminder: your appointment is in 1 hour (${timeOnlyFmt.format(new Date(apptMs))}). See you soon!`\n      }\n    });\n  }\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        1216
+      ],
+      "id": "19cd4728-708c-4eb2-afaa-02736cfbc393",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "859934767194595",
+        "recipientPhoneNumber": "={{ $json.to }}",
+        "textBody": "={{ $json.body }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        96,
+        1216
+      ],
+      "id": "69f086f0-4d98-4c75-8a4d-10e4f25aacaa",
+      "name": "Send message1",
+      "webhookId": "01b5fd80-210d-4668-868b-942070052f0b",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "0YTF49b8d0TZKWcy",
+          "name": "WhatsApp reply 07304 494554"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk",
+          "mode": "list",
+          "cachedResultName": "Automated Bookings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "October",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -368,
+        1216
+      ],
+      "id": "9444f56c-06a8-429f-8521-fa0ce374e3cc",
+      "name": "getTodaysApp",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XCwHsyHOhQ90d1Pq",
+          "name": "Google Sheets demo@clobase.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Daily and hourly reminder",
+        "height": 208,
+        "width": 1056,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        1168
+      ],
+      "id": "2d7884ac-b7be-4e97-96aa-aa415662bc6d",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk",
+          "mode": "list",
+          "cachedResultName": "Automated Bookings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 85504084,
+          "mode": "list",
+          "cachedResultName": "Phonebook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit#gid=85504084"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Number",
+              "lookupValue": "={{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        144,
+        224
+      ],
+      "id": "740a1444-f247-48da-a6e4-2b2c0768e74f",
+      "name": "checkNumber",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XCwHsyHOhQ90d1Pq",
+          "name": "Google Sheets demo@clobase.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk",
+          "mode": "list",
+          "cachedResultName": "Automated Bookings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 85504084,
+          "mode": "list",
+          "cachedResultName": "Phonebook",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit#gid=85504084"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Name', `name provided by the client in a chat`, 'string') }}",
+            "Number": "={{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        256,
+        224
+      ],
+      "id": "4a9e9b29-eb17-4d60-8f4b-098099210c50",
+      "name": "saveNumber",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XCwHsyHOhQ90d1Pq",
+          "name": "Google Sheets demo@clobase.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk",
+          "mode": "list",
+          "cachedResultName": "Automated Bookings",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "October",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1r0-uWwCKzp4a8wFJJGgiIEWPCt8avx4uR1tT9JXf8Wk/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request Date": "={{$now.setZone('Europe/London').toFormat('yyyy-LL-dd HH:mm:ss')}}",
+            "Appointment": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Appointment', `Appointment_Date and time the client has chosen in ISO format`, 'string') }}",
+            "Service": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Service', `Service_Name the client has chosen`, 'string') }}",
+            "Paid": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Paid', `Payment_Confirmation in for of \"Y\" or \"N\"`, 'string') }}",
+            "Client ID": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Client_ID', `Client_ID use `, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Request Date",
+              "displayName": "Request Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Appointment",
+              "displayName": "Appointment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Service",
+              "displayName": "Service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Paid",
+              "displayName": "Paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Client ID",
+              "displayName": "Client ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        384,
+        224
+      ],
+      "id": "6aa17be4-bc8f-4788-a458-3408d6c71400",
+      "name": "logAppointment",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XCwHsyHOhQ90d1Pq",
+          "name": "Google Sheets demo@clobase.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const v1s = ($json.v1Candidates || []).map(s => String(s).trim().toLowerCase());\nconst expected = String($json.expected || '').trim().toLowerCase();\n\nif (!v1s.includes(expected)) {\n  throw new Error(`Invalid Stripe signature\nexpected=${expected}\nreceived=${v1s.join(',')}\nlen=${($json.signedPayload||'').length}`);\n}\n\nconst event = JSON.parse($json.rawBody);\nreturn [{ json: event }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        1440
+      ],
+      "id": "021e2f6f-5f3f-42e6-8ac3-382743575187",
+      "name": "Verify & Parse"
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA256",
+        "value": "={{ $json.signedPayload }}",
+        "dataPropertyName": "expected",
+        "secret": "whsec_J0YtkW2HNcPbsNQxDDYlvzoTwOzNz3Ey"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        1440
+      ],
+      "id": "a37d3625-0dd7-409c-ac3a-8f6efc52adc7",
+      "name": "Compute HMAC"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build \"<timestamp-string>.<rawBody>\" exactly as Stripe signs\n\nconst TOLERANCE_SECONDS = 5 * 60;\n\n// 1) Get the source with headers from the Webhook node (by name)\n// Get the Stripe-Signature header from the Webhook node\nconst sigHeader =\n  $items('paymentCheck')[0].json.headers?.['stripe-signature']   // preferred\n  || $item(0, 'Webhook1').$json.headers?.['stripe-signature'] // alt syntax\n  || $json.headers?.['stripe-signature'];                     // fallback if you merge later\n\nif (!sigHeader) {\n  throw new Error('Missing Stripe-Signature header');\n}\n\n// 2) Get exact raw body string (from previous \"Extract from file\" node)\nlet rawBody = $json.rawBody;\nif (typeof rawBody !== 'string') throw new Error('Missing rawBody string');\n// Strip BOM if present (rare)\nif (rawBody.charCodeAt(0) === 0xFEFF) rawBody = rawBody.slice(1);\n\n// 3) Parse signature header; KEEP timestamp as STRING\nconst parts  = String(sigHeader).split(',').map(s => s.trim());\nconst tPart  = parts.find(p => p.startsWith('t='));\nconst v1List = parts.filter(p => p.startsWith('v1=')).map(p => p.slice(3));\nif (!tPart || v1List.length === 0) {\n  throw new Error('Malformed Stripe-Signature header: ' + sigHeader);\n}\nconst tStr = tPart.slice(2);\n\n// Replay tolerance (convert separately for comparison only)\nconst now  = Math.floor(Date.now() / 1000);\nconst tNum = Number(tStr);\nif (!Number.isFinite(tNum) || Math.abs(now - tNum) > TOLERANCE_SECONDS) {\n  throw new Error('Stripe signature timestamp outside tolerance');\n}\n\n// 4) EXACT bytes Stripe signs\nconst signedPayload = `${tStr}.${rawBody}`;\n\n// Forward to Crypto node\nreturn [{ json: { signedPayload, v1Candidates: v1List, rawBody } }];\n\n$('paymentCheck').first().json.headers['stripe-signature']"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        1440
+      ],
+      "id": "e2b3431f-0ede-4005-aecd-458bdf64c84b",
+      "name": "Prepare Signature Inputs"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "destinationKey": "rawBody",
+        "options": {
+          "encoding": "utf8"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        1440
+      ],
+      "id": "71271471-b211-4854-b92f-6a4cc855f976",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        272,
+        1440
+      ],
+      "id": "261cd322-c7d7-46dc-8c2d-2d9f77713aea",
+      "name": "Respond to paymentCheck"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "41b9cb12-ce59-491a-9749-178e862eba58",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -848,
+        1440
+      ],
+      "id": "beb70067-f7ee-4d76-b784-96013e40ccb0",
+      "name": "paymentCheck",
+      "webhookId": "41b9cb12-ce59-491a-9749-178e862eba58"
+    },
+    {
+      "parameters": {
+        "content": "## Confirm payment\n",
+        "height": 208,
+        "width": 1552,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        1392
+      ],
+      "id": "5909e48a-7790-4506-a511-617f9c05b1d3",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SessionRev (Code node)\nconst g = $getWorkflowStaticData('global'); // persists across executions\ng.rev = (g.rev ?? 0);\n\n// read the inbound WA text\nconst body = $json.messages?.[0]?.text?.body?.trim()?.toLowerCase();\nconst didReset = body === '!!reset';\n\n// bump revision when you send !!reset\nif (didReset) g.rev++;\n\nreturn [{ json: { rev: g.rev, didReset } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        0
+      ],
+      "id": "f0818619-5057-41a8-9936-f799df448098",
+      "name": "SessionRev"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4c5f06bd-b4c9-4e6e-9bb0-ed6ee7513128",
+              "leftValue": "={{ $json.messages && !$json.statuses }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -704,
+        16
+      ],
+      "id": "dabad347-5e89-4f63-b7fe-6b650c50436d",
+      "name": "sysFilter"
+    }
+  ],
+  "connections": {
+    "think": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "simple-memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "booking_agent": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "sysFilter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Products": {
+      "main": [
+        [
+          {
+            "node": "Reverse List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Keep Product Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Prices (by product)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Prices (by product)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Flatten Output": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Set - Flatten Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge Products with Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Set - Keep Product Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getProductList": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "pickFirstSlot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getAllSlotsForTheDay": {
+      "main": [
+        [
+          {
+            "node": "pickFirstSlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FreeBusy": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FreeBusy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getFreeSlot": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "getAllSlotsForTheDay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Products with Prices": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reverse List": {
+      "main": [
+        [
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "createPaymentLink": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "getTodaysApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getTodaysApp": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "checkNumber": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "saveNumber": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "logAppointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify & Parse": {
+      "main": [
+        [
+          {
+            "node": "Respond to paymentCheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute HMAC": {
+      "main": [
+        [
+          {
+            "node": "Verify & Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Signature Inputs": {
+      "main": [
+        [
+          {
+            "node": "Compute HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Signature Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to paymentCheck": {
+      "main": [
+        []
+      ]
+    },
+    "paymentCheck": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SessionRev": {
+      "main": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sysFilter": {
+      "main": [
+        [
+          {
+            "node": "SessionRev",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "global": {
+      "rev": 5
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {
+    "getFreeSlot": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.clobase.com",
+            "user-agent": "axios/1.12.0",
+            "content-length": "130",
+            "accept": "application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7",
+            "accept-encoding": "gzip, compress, deflate, br",
+            "content-type": "application/json",
+            "x-forwarded-for": "172.18.0.1",
+            "x-forwarded-host": "n8n.clobase.com",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "50e28c364b78",
+            "x-real-ip": "172.18.0.1"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "timestamp": "2025-10-10T00:00:00",
+            "timezone": "Europe/London",
+            "slotMinutes": 30,
+            "stepMinutes": 30,
+            "calendarIds": [
+              "jobs@turexy.com"
+            ]
+          },
+          "webhookUrl": "https://n8n.clobase.com/webhook/8f39a144-c02a-48c6-a257-6fea39919c86",
+          "executionMode": "production"
+        }
+      }
+    ],
+    "WhatsApp Trigger": [
+      {
+        "json": {
+          "messaging_product": "whatsapp",
+          "metadata": {
+            "display_phone_number": "447304494554",
+            "phone_number_id": "859934767194595"
+          },
+          "contacts": [
+            {
+              "profile": {
+                "name": "Raf T"
+              },
+              "wa_id": "447855769628"
+            }
+          ],
+          "messages": [
+            {
+              "from": "447855769628",
+              "id": "wamid.HBgMNDQ3ODU1NzY5NjI4FQIAEhgWM0VCMDU4QUMxODYzRkU5Njk4NzBENQA=",
+              "timestamp": "1760183721",
+              "text": {
+                "body": "hi there"
+              },
+              "type": "text"
+            }
+          ],
+          "field": "messages"
+        }
+      }
+    ]
+  },
+  "versionId": "3bc9c9a6-ae12-4a9b-93ae-bf17d2595b22",
+  "triggerCount": 5,
+  "shared": [
+    {
+      "updatedAt": "2025-10-10T12:38:50.062Z",
+      "createdAt": "2025-10-10T12:38:50.062Z",
+      "role": "workflow:owner",
+      "workflowId": "yyvGlxfysKDvGRBz",
+      "projectId": "hCK0QmXlaDJnMyP5"
+    }
+  ],
+  "tags": []
+}
