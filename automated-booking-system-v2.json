@@ -1,0 +1,613 @@
+{
+  "updatedAt": "2025-11-04T15:42:48.000Z",
+  "createdAt": "2025-09-10T10:35:45.980Z",
+  "id": "6YbO2yVk3tyKtd90",
+  "name": "Automated booking system v2",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Lead Name"
+            },
+            {
+              "name": "Email"
+            },
+            {
+              "name": "Message"
+            },
+            {
+              "name": "Company information"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1c9c4f2c-776a-403d-b635-2d23d9d507da",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1,
+      "position": [
+        976,
+        256
+      ],
+      "id": "713932c9-dd79-474a-9e65-3d18e0d9267e",
+      "name": "think"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "turexy@clobase.com",
+          "mode": "list",
+          "cachedResultName": "turexy@clobase.com"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', `Start time for the dental appointment.`, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', `End time for the dental appointment. This should be 1 hour AFTER the start time.`, 'string') }}",
+        "additionalFields": {
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', 'The title/summary of this event should be in the format of \"Dental Appointment | {patient_name}\" where `patient_name` is the provided name of the patient.', 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        240
+      ],
+      "id": "7443d706-a3eb-49d7-a353-6e23e5dff519",
+      "name": "create_appointment"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1328,
+        0
+      ],
+      "id": "5f8934ee-fc79-42df-9ec6-ceb5cc29e2d3",
+      "name": "respond_to_webhook"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        480,
+        240
+      ],
+      "id": "02c13bf1-cee0-44e0-ac1a-186582c2f41e",
+      "name": "gemini-2.5-flash",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Tf3E2tt2yFVyo9C5",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=## Request Data\n\n{{ JSON.stringify($json.body, null, 2)}}\n",
+        "options": {
+          "systemMessage": "=## Role\n\nYou are an AI agent responsible for handling back office operations at the dental office \"Pearly Whites Dental\". You must make a decision about the data you receive and make a call into the appropriate tool in order to process this request and return the appropriate data necessary.\n\nYou should look at the provided `tool` value in the request body to help decided which tool to use.\n\nPay close attention to the constraints for number of times a tool is able to be used.\n\nYou have secure access to the following internal tools:\n  - `think` → you MUST use this to think carefully about how to handle the provided request data. This tool must be used on every turn and tool call interaction.\n  - `get_availability` → returns few available appointiments on the Dental Office Calendar for the given start timestamp. **For availability requests.  Matches the `get_availability` tool gets available time slots for given day. If a date/timestamp is present or the user asks for availability, CALL the tool `get_availability`\n  - `create_appointment` → creates a 1-hour appointment event for the provided start time. This tool may only be called ONCE (1 time) in a given request. Do NOT use this tool multiple times. Matches the `create_appointment` tool value included in the request. If you use this tool more than once, your task will be considered a FAILURE.\n  - `log_patient_details` → logs the provided call details and patient details to a Google Sheet. This should ONLY be called and used once for a provided request since we are logging details ONCE per call/patient. In order to use this tool, you need to be given the patient name / insurance provider / optional questions and concerns - if you don't have this information, you should NOT use this tool. This will be used only at the very end of the call when all details are provided. Matches the `log_patient_details` tool value included in the request. If you use this tool more than once, your task will be considered a FAILURE.\n\n\n## Special Instructions for get_availability Tool\n\nWhen handling availability requests:\n\n1. **Always aim to return 2-4 available timeslots** when possible\n\n2. **Response format:** Return an array of available timeslots in ISO format:\n   ```json\n{ \"available\": <bool>, \"selectedSlots\": [ { \"startLocal\", \"endLocal\", \"timezone\" }, ... ] }\n   ```\n\n3. **If fewer than 2 slots are found:**\n   - Return whatever available slots you found (even if just 1)\n   - It's better to return 1 slot than none\n\n\nRemember: The get_availability, create_appointment and log_patient_details must only be called ONCE per request."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ],
+      "id": "2c469bd3-ea47-44ed-8afb-dc3a06f7d072",
+      "name": "dental_agent"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1w1UvSuTumWF4JAyRh-1-QmzBMS_6ZBwsFMgrOAhCP14",
+          "mode": "list",
+          "cachedResultName": "Dental Appointments",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1w1UvSuTumWF4JAyRh-1-QmzBMS_6ZBwsFMgrOAhCP14/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Appointments",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1w1UvSuTumWF4JAyRh-1-QmzBMS_6ZBwsFMgrOAhCP14/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Patient name ": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Patient_name___using_to_match_', ``, 'string') }}",
+            "Date/Time called": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date_Time_called', ``, 'string') }}",
+            "Comments": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Comments', ``, 'string') }}",
+            "Appointment time": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Appointment_time', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "Booked appointment"
+          ],
+          "schema": [
+            {
+              "id": "Patient name ",
+              "displayName": "Patient name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date/Time called",
+              "displayName": "Date/Time called",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Comments",
+              "displayName": "Comments",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Appointment time",
+              "displayName": "Appointment time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.6,
+      "position": [
+        1280,
+        240
+      ],
+      "id": "77e27acb-03c2-4de3-85c7-ef6e0af00b6f",
+      "name": "log_patient_details"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Edit Fields').item.json.headers[\"cf-ray\"] }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        256
+      ],
+      "id": "b494ec0b-dc75-41dd-9911-c4d972d52a08",
+      "name": "simple-memory"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n\"headers\": \n{\n\"host\": \n\"turexy.app.n8n.cloud\",\n\"user-agent\": \n\"ElevenLabs/1.0\",\n\"content-length\": \n\"64\",\n\"accept\": \n\"*/*\",\n\"accept-encoding\": \n\"gzip, br\",\n\"cdn-loop\": \n\"cloudflare; loops=1; subreqs=1\",\n\"cf-connecting-ip\": \n\"34.59.11.47\",\n\"cf-ew-via\": \n\"15\",\n\"cf-ipcountry\": \n\"US\",\n\"cf-ray\": \n\"9774c3a164c7e80c-ORD\",\n\"cf-visitor\": \n\"{\\\"scheme\\\":\\\"https\\\"}\",\n\"cf-worker\": \n\"n8n.cloud\",\n\"content-type\": \n\"application/json\",\n\"x-forwarded-for\": \n\"34.59.11.47, 172.71.254.50\",\n\"x-forwarded-host\": \n\"turexy.app.n8n.cloud\",\n\"x-forwarded-port\": \n\"443\",\n\"x-forwarded-proto\": \n\"https\",\n\"x-forwarded-server\": \n\"traefik-prod-users-gwc-40-669b86c79-vv48h\",\n\"x-is-trusted\": \n\"yes\",\n\"x-real-ip\": \n\"34.59.11.47\"\n},\n\"params\": \n{\n},\n\"query\": \n{\n},\n\"body\": \n{\n\"timestamp\": \n\"2025-09-01T09:00:00\",\n\"tool\": \n\"get_availability\"\n},\n\"webhookUrl\": \n\"https://turexy.app.n8n.cloud/webhook/4fe15a31-6365-4b96-a3d5-3b02bbe3d31a\",\n\"executionMode\": \n\"production\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        0
+      ],
+      "id": "444aa0cc-c55b-46bf-b89d-7111c6a85520",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://turexy.app.n8n.cloud/webhook/find-slots",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  timestamp: $fromAI('timestamp','ISO day anchor e.g. 2025-09-02T00:00:00','string') || $json.body?.timestamp,\n  timezone:  $fromAI('timezone','IANA timezone','string') || 'Europe/London',\n  slotMinutes: Number($fromAI('slotMinutes','minutes per slot','number') ?? 30),\n  stepMinutes: Number($fromAI('stepMinutes','slot step in minutes','number') ?? 30),\n  calendarIds: Array.isArray($json.body?.calendarIds) ? $json.body.calendarIds : ['jobs@turexy.com']\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        816,
+        240
+      ],
+      "id": "cb7fb115-d5b2-45ca-a297-2eb3d0313f3c",
+      "name": "get_availability"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input expected on $json:\n// { slots: [ {startZ:\"...\", endZ:\"...\"}, ... ], timezone: \"Europe/London\" }\n\nconst slots = Array.isArray($json.slots) ? $json.slots.slice() : [];\nconst tz = $json.timezone || 'Europe/London';\n\n// nothing to do\nif (!slots.length) {\n  return [{ json: { available: false, reason: 'no_slots_for_day' } }];\n}\n\n// sort by start time (UTC)\nslots.sort((a, b) => new Date(a.startZ) - new Date(b.startZ));\n\n// helper: local hour in given zone\nfunction localHour(iso, zone) {\n  return Number(new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso)));\n}\n\n// helper: build local ISO like 2025-09-01T09:30:00 (no offset, use with timeZone later)\nfunction toLocalISO(iso, zone) {\n  const d = new Date(iso);\n  const datePart = new Intl.DateTimeFormat('en-CA', { // en-CA => YYYY-MM-DD\n    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(d);\n  const timePart = new Intl.DateTimeFormat('en-GB', {\n    timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,\n  }).format(d);\n  return `${datePart}T${timePart}`;\n}\n\n// split into AM (<12) and PM (>=12) by local start time\nconst am = [];\nconst pm = [];\nfor (const s of slots) {\n  const h = localHour(s.startZ, tz);\n  (h < 12 ? am : pm).push(s);\n}\n\n// choose up to two slots\nconst chosen = [];\nif (am.length && pm.length) {\n  chosen.push(am[0], pm[0]);                 // earliest AM + earliest PM\n} else if (am.length >= 2) {\n  chosen.push(am[0], am[1]);                 // two AM\n} else if (pm.length >= 2) {\n  chosen.push(pm[0], pm[1]);                 // two PM\n} else if (am.length === 1) {\n  chosen.push(am[0]);                        // only one AM\n} else if (pm.length === 1) {\n  chosen.push(pm[0]);                        // only one PM\n}\n\n// if still nothing, return unavailable\nif (!chosen.length) {\n  return [{ json: { available: false, reason: 'no_slots_after_filters' } }];\n}\n\n// enrich with local times for direct use in Calendar (local dt + separate timeZone)\nconst proposals = chosen.map(s => ({\n  ...s,\n  startLocal: toLocalISO(s.startZ, tz),\n  endLocal:   toLocalISO(s.endZ,   tz),\n  timezone:   tz,\n}));\n\nreturn [{\n  json: {\n    available: true,\n    selectedSlots: proposals,      // up to 2 items\n    counts: { am: am.length, pm: pm.length }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        496
+      ],
+      "id": "813f2048-2219-493a-984c-64b903ce0bd7",
+      "name": "pickFirstSlot"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect TWO upstream items: one \"config\" (windowStart/windowEnd/slotMinutes/stepMinutes/...)\n// and one \"freebusy\" (calendars: { <id>: { busy: [{start,end},...] } })\n\n// 1) Find config + freebusy items\nlet cfg = null, fb = null;\nfor (const it of items) {\n  const j = it.json || {};\n  if (!cfg && j.windowStart && j.windowEnd) cfg = j;\n  if (!fb && j.calendars) fb = j;\n}\nif (!cfg) throw new Error(\"Config item missing windowStart/windowEnd\");\nif (!fb || !fb.calendars) throw new Error(\"FreeBusy item missing calendars\");\n\n// 2) Helpers\nfunction toMs(iso){ const t = Date.parse(iso); if (Number.isNaN(t)) throw new Error(\"Bad ISO: \"+iso); return t; }\n\n// 3) Read config\nconst windowStart = toMs(cfg.windowStart);\nconst windowEnd   = toMs(cfg.windowEnd);\nconst slotMs      = (Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst stepMs      = (Number(cfg.stepMinutes) || Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst bufBeforeMs = (Number(cfg.bufferBeforeMinutes) || 0) * 60 * 1000;\nconst bufAfterMs  = (Number(cfg.bufferAfterMinutes)  || 0) * 60 * 1000;\n\n// 4) Collect busy intervals across all calendars\nlet intervals = [];\nfor (const [id, cal] of Object.entries(fb.calendars)) {\n  if (!cal || (cal.errors && cal.errors.length)) continue;\n  const busy = Array.isArray(cal.busy) ? cal.busy : [];\n  for (const b of busy) {\n    let s = toMs(b.start) - bufBeforeMs;\n    let e = toMs(b.end)   + bufAfterMs;\n    if (e <= windowStart || s >= windowEnd) continue;   // outside day window\n    if (s < windowStart) s = windowStart;\n    if (e > windowEnd)   e = windowEnd;\n    intervals.push([s, e]);\n  }\n}\nintervals.sort((a,b) => a[0] - b[0]);\n\n// 5) Merge overlaps\nconst merged = [];\nfor (const iv of intervals) {\n  if (!merged.length || iv[0] > merged[merged.length-1][1]) merged.push([iv[0], iv[1]]);\n  else if (iv[1] > merged[merged.length-1][1]) merged[merged.length-1][1] = iv[1];\n}\n\n// 6) Free ranges = window − merged busy\nconst freeRanges = [];\nlet cursor = windowStart;\nfor (const [s,e] of merged) {\n  if (cursor < s) freeRanges.push([cursor, s]);\n  if (e > cursor) cursor = e;\n}\nif (cursor < windowEnd) freeRanges.push([cursor, windowEnd]);\n\n// 7) Slice free ranges into slots (UTC)\nfunction ceilToStep(t){ const r = (t - windowStart) % stepMs; return r === 0 ? t : t + (stepMs - r); }\nconst slots = [];\nfor (const [fs,fe] of freeRanges) {\n  let t = ceilToStep(fs);\n  while (t + slotMs <= fe) {\n    slots.push({\n      startZ: new Date(t).toISOString(),\n      endZ:   new Date(t + slotMs).toISOString()\n    });\n    t += stepMs;\n  }\n}\n\n// 8) (Optional) friendly debug\nconst toZ = ([s,e]) => ({ startZ: new Date(s).toISOString(), endZ: new Date(e).toISOString() });\n\nreturn [{\n  json: {\n    slots,\n    debug: {\n      windowStartZ: new Date(windowStart).toISOString(),\n      windowEndZ:   new Date(windowEnd).toISOString(),\n      mergedBusy:   merged.map(toZ),\n      freeRanges:   freeRanges.map(toZ)\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        496
+      ],
+      "id": "301f388b-2cdf-4058-8a55-9bbe1660acf6",
+      "name": "getAllSlotsForTheDay"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  timeMin: $node[\"Config\"].json.windowStart,\n  timeMax: $node[\"Config\"].json.windowEnd,\n  timeZone: $node[\"Config\"].json.timezone,\n  items: $node[\"Config\"].json.calendarIds.map(id => ({ id }))\n}) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        640
+      ],
+      "id": "7dc326bf-e35b-4c50-83ce-a485b9d72b06",
+      "name": "FreeBusy"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "config",
+              "field2": "FreeBusy"
+            }
+          ]
+        },
+        "joinMode": "keepNonMatches",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        672,
+        496
+      ],
+      "id": "d9f22672-0802-405c-a6e9-8d9f6c6ba975",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cd5b085c-7436-46fb-8bd5-aa0d52e965d2",
+              "name": "timezone",
+              "value": "={{ $json.timezone || 'Europe/London' }}",
+              "type": "string"
+            },
+            {
+              "id": "ff51dc5e-3094-4db9-aa39-7da0987cc3c8",
+              "name": "slotMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "091d9d63-9f47-446e-9798-2d871e74ba81",
+              "name": "stepMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "ee4c98c6-2117-4228-9756-a6c1abc6c7ee",
+              "name": "bufferBeforeMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "2ffc85a8-aeb9-440b-b8dc-1102746abef3",
+              "name": "bufferAfterMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "cac063a9-6a5e-40e2-bc97-25e7f720c4f0",
+              "name": "calendarIds",
+              "value": "=[\"jobs@turexy.com\"]",
+              "type": "array"
+            },
+            {
+              "id": "448b1372-b153-4a4b-b761-9019f5b41add",
+              "name": "windowStart",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,                              // <-- read from body\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.startHour ?? 9), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "56ec02c4-69d8-4697-8229-5f2fc3cd0615",
+              "name": "windowEnd",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.endHour ?? 17), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "143b7abf-f257-4d34-8b64-59a8f003cc42",
+              "name": "startHour",
+              "value": "={{ ($json.workday && $json.workday.startHour) || 8 }}",
+              "type": "number"
+            },
+            {
+              "id": "bf63f4f1-c843-49fa-984d-19260e9d4f6b",
+              "name": "endHour",
+              "value": "={{ ($json.workday && $json.workday.endHour) || 17 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        480
+      ],
+      "id": "7ae22412-644d-4208-8622-d1c554d5eaa4",
+      "name": "Config"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  available: $json.available,\n  selectedSlots: $json.selectedSlots,    // up to two items, each has startLocal/endLocal/timezone\n  timezone: $json.selectedSlots?.[0]?.timezone || $json.timezone\n} }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1328,
+        496
+      ],
+      "id": "741b0640-3acb-4cef-93f5-8a0a382e5754",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/find-slots",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        48,
+        480
+      ],
+      "id": "18c6e80e-3abc-49e6-99af-d95a387f456e",
+      "name": "getFreeSlot",
+      "webhookId": "cc6be9d7-6ebb-4a45-b091-3725a72af2b1"
+    }
+  ],
+  "connections": {
+    "think": {
+      "ai_tool": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gemini-2.5-flash": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dental_agent": {
+      "main": [
+        [
+          {
+            "node": "respond_to_webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log_patient_details": {
+      "ai_tool": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "simple-memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "dental_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "pickFirstSlot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getAllSlotsForTheDay": {
+      "main": [
+        [
+          {
+            "node": "pickFirstSlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FreeBusy": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "getAllSlotsForTheDay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FreeBusy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getFreeSlot": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "c585ba14-087a-4b8a-b82d-5113d76e7914",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-09-10T10:35:45.985Z",
+      "createdAt": "2025-09-10T10:35:45.985Z",
+      "role": "workflow:owner",
+      "workflowId": "6YbO2yVk3tyKtd90",
+      "projectId": "hCK0QmXlaDJnMyP5"
+    }
+  ],
+  "tags": []
+}
