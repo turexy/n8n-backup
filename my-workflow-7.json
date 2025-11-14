@@ -1,0 +1,688 @@
+{
+  "updatedAt": "2025-11-02T10:58:12.000Z",
+  "createdAt": "2025-11-02T09:58:16.105Z",
+  "id": "JDVxCb3dqJHRRowU",
+  "name": "My workflow 7",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Input expected on $json:\n// { slots: [ {startZ:\"...\", endZ:\"...\"}, ... ], timezone: \"Europe/London\" }\n\nconst slots = Array.isArray($json.slots) ? $json.slots.slice() : [];\nconst tz = $json.timezone || 'Europe/London';\n\n// nothing to do\nif (!slots.length) {\n  return [{ json: { available: false, reason: 'no_slots_for_day' } }];\n}\n\n// sort by start time (UTC)\nslots.sort((a, b) => new Date(a.startZ) - new Date(b.startZ));\n\n// helper: local hour in given zone\nfunction localHour(iso, zone) {\n  return Number(new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso)));\n}\n\n// helper: build local ISO like 2025-09-01T09:30:00 (no offset, use with timeZone later)\nfunction toLocalISO(iso, zone) {\n  const d = new Date(iso);\n  const datePart = new Intl.DateTimeFormat('en-CA', { // en-CA => YYYY-MM-DD\n    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(d);\n  const timePart = new Intl.DateTimeFormat('en-GB', {\n    timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,\n  }).format(d);\n  return `${datePart}T${timePart}`;\n}\n\n// split into AM (<12) and PM (>=12) by local start time\nconst am = [];\nconst pm = [];\nfor (const s of slots) {\n  const h = localHour(s.startZ, tz);\n  (h < 12 ? am : pm).push(s);\n}\n\n// choose up to two AM and two PM slots\nconst chosen = [...am.slice(0, 4), ...pm.slice(0, 4)];\n\n// if still nothing, return unavailable\nif (!chosen.length) {\n  return [{ json: { available: false, reason: 'no_slots_after_filters' } }];\n}\n\n// enrich with local times for direct use in Calendar (local dt + separate timeZone)\nconst proposals = chosen.map(s => ({\n  ...s,\n  startLocal: toLocalISO(s.startZ, tz),\n  endLocal:   toLocalISO(s.endZ,   tz),\n  timezone:   tz,\n}));\n\nreturn [{\n  json: {\n    available: true,\n    selectedSlots: proposals,      // up to 4 items (2 AM + 2 PM)\n    counts: { am: am.length, pm: pm.length }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        1200
+      ],
+      "id": "76dc7156-aea3-46de-a276-fb29175c4afe",
+      "name": "pickFirstSlot"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect TWO upstream items: one \"config\" (windowStart/windowEnd/slotMinutes/stepMinutes/...)\n// and one \"freebusy\" (calendars: { <id>: { busy: [{start,end},...] } })\n\n// 1) Find config + freebusy items\nlet cfg = null, fb = null;\nfor (const it of items) {\n  const j = it.json || {};\n  if (!cfg && j.windowStart && j.windowEnd) cfg = j;\n  if (!fb && j.calendars) fb = j;\n}\nif (!cfg) throw new Error(\"Config item missing windowStart/windowEnd\");\nif (!fb || !fb.calendars) throw new Error(\"FreeBusy item missing calendars\");\n\n// helpers\nfunction toMs(iso){ const t = Date.parse(iso); if (Number.isNaN(t)) throw new Error(\"Bad ISO: \"+iso); return t; }\nfunction localHM(iso, zone) {\n  const s = new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso));\n  const [h,m] = s.split(':').map(Number);\n  return h*60 + m;\n}\nfunction localWeekday(iso, zone) {\n  return new Intl.DateTimeFormat('en-GB', { weekday: 'long', timeZone: zone })\n    .format(new Date(iso)); // e.g. \"Tuesday\"\n}\n\n// Map business hours (minutes since midnight). null => closed.\nfunction getBusinessWindow(weekday) {\n  switch (weekday) {\n    case 'Monday':    return null;                  // closed\n    case 'Tuesday':\n    case 'Wednesday': return { open: 10*60, close: 19*60 }; // 10:00–19:00\n    case 'Thursday':\n    case 'Friday':    return { open: 10*60, close: 20*60 }; // 10:00–20:00\n    case 'Saturday':  return { open: 10*60, close: 18*60 }; // 10:00–18:00\n    case 'Sunday':    return { open: 11*60, close: 16*60 }; // 11:00–16:00\n    default:          return null;\n  }\n}\n\n// 2) Read config\nconst tz          = cfg.timezone || 'Europe/London';\nconst windowStart = toMs(cfg.windowStart);\nconst windowEnd   = toMs(cfg.windowEnd);\nconst slotMs      = (Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst stepMs      = (Number(cfg.stepMinutes) || Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst bufBeforeMs = (Number(cfg.bufferBeforeMinutes) || 0) * 60 * 1000;\nconst bufAfterMs  = (Number(cfg.bufferAfterMinutes)  || 0) * 60 * 1000;\n\n// 3) Collect busy intervals across all calendars\nlet intervals = [];\nfor (const [id, cal] of Object.entries(fb.calendars)) {\n  if (!cal || (cal.errors && cal.errors.length)) continue;\n  const busy = Array.isArray(cal.busy) ? cal.busy : [];\n  for (const b of busy) {\n    let s = toMs(b.start) - bufBeforeMs;\n    let e = toMs(b.end)   + bufAfterMs;\n    if (e <= windowStart || s >= windowEnd) continue;   // outside day window\n    if (s < windowStart) s = windowStart;\n    if (e > windowEnd)   e = windowEnd;\n    intervals.push([s, e]);\n  }\n}\nintervals.sort((a,b) => a[0] - b[0]);\n\n// 4) Merge overlaps\nconst merged = [];\nfor (const iv of intervals) {\n  if (!merged.length || iv[0] > merged[merged.length-1][1]) merged.push([iv[0], iv[1]]);\n  else if (iv[1] > merged[merged.length-1][1]) merged[merged.length-1][1] = iv[1];\n}\n\n// 5) Free ranges = window - merged busy\nconst freeRanges = [];\nlet cursor = windowStart;\nfor (const [s,e] of merged) {\n  if (cursor < s) freeRanges.push([cursor, s]);\n  if (e > cursor) cursor = e;\n}\nif (cursor < windowEnd) freeRanges.push([cursor, windowEnd]);\n\n// 6) Slice free ranges into slots (UTC) — enforce \"no past\" and \">= now + 1h\"\nfunction ceilToStep(t){ const r = (t - windowStart) % stepMs; return r === 0 ? t : t + (stepMs - r); }\nconst nowMs = Date.now();\nconst minStart = Math.max(windowStart, nowMs + 60 * 60 * 1000); // >= current time + 1h\n\nlet slots = [];\nfor (const [fs,fe] of freeRanges) {\n  const effectiveStart = Math.max(fs, minStart);\n  if (effectiveStart >= fe) continue;\n\n  let t = ceilToStep(effectiveStart);\n  while (t + slotMs <= fe) {\n    slots.push({\n      startZ: new Date(t).toISOString(),\n      endZ:   new Date(t + slotMs).toISOString()\n    });\n    t += stepMs;\n  }\n}\n\n// 7) FILTER to business hours for the day (in tz)\nconst weekday = localWeekday(cfg.windowStart, tz);\nconst biz = getBusinessWindow(weekday);\n\n// If closed, wipe slots.\nif (!biz) slots = [];\nelse {\n  slots = slots.filter(s => {\n    const startHM = localHM(s.startZ, tz);\n    const endHM   = localHM(s.endZ,   tz);\n    return startHM >= biz.open && endHM <= biz.close;\n  });\n}\n\n// 8) Output (plus some debug)\nconst toZ = ([s,e]) => ({ startZ: new Date(s).toISOString(), endZ: new Date(e).toISOString() });\n\nreturn [{\n  json: {\n    slots,\n    debug: {\n      timezone: tz,\n      weekday,\n      businessWindowMinutes: biz || null,\n      windowStartZ: new Date(windowStart).toISOString(),\n      windowEndZ:   new Date(windowEnd).toISOString(),\n      mergedBusy:   merged.map(toZ),\n      freeRanges:   freeRanges.map(toZ),\n      minStartZ:    new Date(minStart).toISOString(),\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        1200
+      ],
+      "id": "6e55e5f8-f684-43b5-bfab-32187409deb6",
+      "name": "getAllSlotsForTheDay"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  timeMin: $node[\"ConfigForTwo\"].json.windowStart,\n  timeMax: $node[\"ConfigForTwo\"].json.windowEnd,\n  timeZone: $node[\"ConfigForTwo\"].json.timezone,\n  items: $node[\"ConfigForTwo\"].json.calendarIds.map(id => ({ id }))\n}) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        256,
+        1200
+      ],
+      "id": "7d42a9e9-b172-41ab-bcd4-367f6530d289",
+      "name": "FreeBusy",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bCgeKmyn9b1BZgTp",
+          "name": "Unnamed credential"
+        },
+        "googleOAuth2Api": {
+          "id": "jMGCrDX8pBYUuzg2",
+          "name": "Google account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "config",
+              "field2": "FreeBusy"
+            }
+          ]
+        },
+        "joinMode": "keepNonMatches",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        640,
+        1248
+      ],
+      "id": "18b7e47e-7e8c-481f-878f-d3c8baa5ac8b",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({\n  availableSlots: ($json.selectedSlots || []).map(s => s.startLocal),\n  timezone: ($json.selectedSlots && $json.selectedSlots.length > 0)\n    ? $json.selectedSlots[0].timezone\n    : ($json.timezone || 'UTC')\n}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1344,
+        1200
+      ],
+      "id": "0cf1055c-5375-45c0-b5f5-4b94f51bd7ea",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        992
+      ],
+      "id": "a85750c7-62b2-4978-b1ee-7ed90f01035c",
+      "name": "think"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Chat').item.json.chatInput }}",
+        "options": {
+          "systemMessage": "=# Role and Objective\n\nYou are \"Alex\", the efficient, friendly, and professional appointment scheduling assistant for Max's barber shop, \"Short, Back & Vibes\". Your sole function is to book appointments; you cannot cancel or reschedule. Focus on quickly and politely finding a suitable appointment slot for each client. You need to think before and after running each tool, you need to verify you have all the data required before responding to the client.\n\n\n# Operating Hours\n- Monday: Closed\n- Tuesday - Wednesday: 10:00am – 07:00pm\n- Thursday – Friday: 10:00am – 08:00pm\n- Saturday: 10:00am – 06:00 pm\n- Sunday: 11:00am – 04:00pm\n- Current date/time: {{$now}}\nMention the shop's opening hours only if client asks for it.\n\n# Tone\n- Maintain a clear, concise, and professional style. Use a warm, friendly, and reassuring manner to build trust.\n- Don't over use client's name, use it once when greeting client (Step 1.) and once again when te booking is confirmed (Step x).\n\n# Goal\nFollow the \"Core Workflow\" each step in turn, to schedule client appointments efficiently. If you miss any of the steps, your job will be considered as a failure!\n\n## Core Workflow\n1. **Verify if client exists in our Phone Book\"\n- Client number is 1111111\n- Before first reply to the client you must run \"checkNumber\" tool.\n- Use \"checkNumber\" tool to check if the number exists in the Phone Book\nif number exists  > Greet client with client's name pulled from the phone book\nif name is not returned > Say something like: \n\n\"Welcome to Short, Back & Vibes ✂️✨ Seems like you’re new to our crew — could you drop me your first name so we can keep the good energy rolling and get you booked in?\" and use \"saveNumber\" tool to save client's name and phone number to the Phone Book.\n- Always standarise the name by using only first capital letter and all the rest lower case letters\nExamples:\nBAD: \"THOMAS\"\nBAD: \"THomas\"\nBAD: \"thomas\"\nGOOD: \"Thomas\"\n- Do not offer or ask about booking at this stage we will do it later!\n\n2. **Determine Intent**\n- If greeted by client, respond warmly and ask if they'd like to book an appointment.\n- If the client wants to schedule, proceed to Step 3.\n- Ask for preferred day and use \"getAvailability\" tool check for available slots.\n- For any other query, respond: \"This chat is solely for booking appointments. For other queries, please contact Max on 07765 918355.\" Only use this if not booking.\n- Do not offer a date until you have the client’s name.\n\n3. **Ask for Preferred Day & Use Availability Tool**\n  1. Ask if they have a preferred day of the week: \"Got a day in mind that works best for your visit?\"\n  2. If the client wishes to come with a second person (for example their son or any other person) when using the 'getAvailability' tool set the \"bookForTwo\" argument to true, otherwise it should be always set to false \n  3. The appointment can only be booked five days in advance from {{$now}}. You should explain this politely but only if client tries to book an appointment more than 5 days ahead.\n  4. When provided (e.g., \"next Tuesday\"), convert to ISO format for that day’s start time and call `getAvailability({ \"appointmentDateTime\": \"<ISO-timestamp>\" })`.\n  5. For requests like \"as soon as possible\":\n    - Check if the request is being made during working hours\n      if yes - check for today appointment\n      if not - check for next working day appointments\n  6. If client says something like: \"tomorrow morning\" - check available slots the following day and present only AM slots if available.\n  7. 'getAvailability' tool should return all possible slots AM and PM\n    - Example:\nAM:\nstartZ:2025-10-10T08:00:00.000Z\nendZ:2025-10-10T08:30:00.000Z\nstartLocal:2025-10-10T09:00:00\nendLocal:2025-10-10T09:30:00\n\nPM:\nstartZ:2025-10-10T13:30:00.000Z\nendZ:2025-10-10T14:00:00.000Z\nstartLocal:2025-10-10T14:30:00\nendLocal:2025-10-10T15:00:00\n\n  8. Present all available times returned by getAvailability tool in easy to read format: \n  - Example:\n    \"Great, I have several times available on \n    [date]: [time]\n    [date]: [time]\n    ...\n    [date]: [time]\n    [date]: [time]\"\n  - Don't mention timezone (Europe/London) in your response!\n  9. Ask which time they prefer.\n  10. After their selection, proceed to Step 4. \"Confirm and Book Appointment\"\n\n4. **Provide Final Confirmation**\n- Confirm the booking: \"You're all set for your appointment.\" (Do not mention the year.)\n\n5. **Save the appointment in google sheet**\n- Use \"logAppointment\" tool to log all the data you collected during booking process, you will need:\n-- ClientID from the \"Automated Bookings\" spreadsheet \"Phonebook\" tab\n-- Request_Date which is current date and time\n-- Appointment_Date and time the client has chosen (do not include \"+01:00\" if it exists)\n-- Service_Name the client has chosen\n\n\n## Guardrails\n- Do not include your reasoning, validation, thought process or timezone (Europe/London) in replies to clients; client-facing responses must be concise, focused, sms like.\n- saveNumber can be only run if client does not exists in the phone book, if not sure run \"checkNumber\" tool to check.\n- For all non-scheduling queries, provide Max's mobile: 07765 918355.\n- Never imply a booking is completed before Step 5.\n- If client at any point replies \"!!reset\"; politely acknowledge and say: \"New session has been created\"\n\n## Tools\n- **`checkNumber`**: Returns name and number if contact exists in Phone Book\n- Args: `{ \"wa_id\": \"client_number\" }\n- **`saveNumber`**: Saves client details into Phone Book\n- **`getAvailability`**: Returns available times for a given date.\n- Args: `{ \"appointmentDateTime\": \"YYYY-MM-DDTHH:MM:SS\", \"bookForTwo\" : Boolean}`\n- Returns: `{ \"availableSlots\": [\"YYYY-MM-DDTHH:MM:SS\", ...] }`"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        400,
+        752
+      ],
+      "id": "bf3ce123-3c29-46a3-9c8e-3b06d0ddb9ed",
+      "name": "booking_agent"
+    },
+    {
+      "parameters": {
+        "content": "## Main flow\n",
+        "height": 400,
+        "width": 1680,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        736
+      ],
+      "id": "7bd7da11-afc6-47ad-8712-280f8c5e02a1",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "gpt-5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -368,
+        992
+      ],
+      "id": "737b6ba4-8bdb-4ce0-8400-65b742184081",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "Hj3yd6iSfl3uprM4",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.clobase.com/webhook/70934dce-1784-4a1d-898d-23ba55fe120",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  timestamp: $fromAI('timestamp','ISO day anchor e.g. 2025-09-02T00:00:00','string') || $json.body?.timestamp,\n  timezone:  $fromAI('timezone','IANA timezone','string') || 'Europe/London',\n  slotMinutes: Number($fromAI('slotMinutes','minutes per slot','number') ?? 30),\n  stepMinutes: Number($fromAI('stepMinutes','slot step in minutes','number') ?? 30),\n  calendarIds: Array.isArray($json.body?.calendarIds) ? $json.body.calendarIds : ['jobs@turexy.com'],\n  bookForTwo: $fromAI('bookForTwo', 'is the booking for 2 people')\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        608,
+        976
+      ],
+      "id": "404d11ec-fa6b-4a72-a43a-7cc7afd12d7c",
+      "name": "getAvailability1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SessionRev (Code node)\nconst g = $getWorkflowStaticData('global'); // persists across executions\ng.rev = (g.rev ?? 0);\n\n// read the inbound WA text\nconst body = $json.chatInput?.[0]?.text?.body?.trim()?.toLowerCase();\nconst didReset = body === '!!reset';\n\n// bump revision when you send !!reset\nif (didReset) g.rev++;\n\nreturn [{ json: { rev: g.rev, didReset } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        752
+      ],
+      "id": "0a4625ca-8bc9-444f-891f-525e299296c6",
+      "name": "SessionRev"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -336,
+        768
+      ],
+      "id": "ce726089-6cfc-4247-a78c-8084663d381d",
+      "name": "Chat",
+      "webhookId": "3c6e0afb-f2e3-4580-8aae-0fbab2e898a9"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=ai-booking-agent-r{{ $('SessionRev').item.json.rev }}",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        288,
+        1008
+      ],
+      "id": "efe3b834-62a4-4111-ba1c-1cd7cf195f95",
+      "name": "simple-memory"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2ac8220d-3d60-48fc-967d-6d669174b2a8",
+              "leftValue": "={{ $json.body.bookForTwo }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        1472
+      ],
+      "id": "0e0a377f-8367-4a1a-a41f-d4fc60a7be1b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "70934dce-1784-4a1d-898d-23ba55fe120",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -480,
+        1456
+      ],
+      "id": "755dabf5-ec9b-4b6f-a0b2-8aa989991752",
+      "name": "getFreeSlotsTest",
+      "webhookId": "70934dce-1784-4a1d-898d-23ba55fef95d"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cd5b085c-7436-46fb-8bd5-aa0d52e965d2",
+              "name": "timezone",
+              "value": "={{ $json.timezone || 'Europe/London' }}",
+              "type": "string"
+            },
+            {
+              "id": "ff51dc5e-3094-4db9-aa39-7da0987cc3c8",
+              "name": "slotMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "091d9d63-9f47-446e-9798-2d871e74ba81",
+              "name": "stepMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "ee4c98c6-2117-4228-9756-a6c1abc6c7ee",
+              "name": "bufferBeforeMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "2ffc85a8-aeb9-440b-b8dc-1102746abef3",
+              "name": "bufferAfterMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "cac063a9-6a5e-40e2-bc97-25e7f720c4f0",
+              "name": "calendarIds",
+              "value": "=[\"demo@clobase.com\"]",
+              "type": "array"
+            },
+            {
+              "id": "448b1372-b153-4a4b-b761-9019f5b41add",
+              "name": "windowStart",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,                              // <-- read from body\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.startHour ?? 10), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "56ec02c4-69d8-4697-8229-5f2fc3cd0615",
+              "name": "windowEnd",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.endHour ?? 19), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "143b7abf-f257-4d34-8b64-59a8f003cc42",
+              "name": "startHour",
+              "value": "={{ ($json.workday && $json.workday.startHour) || 9 }}",
+              "type": "number"
+            },
+            {
+              "id": "bf63f4f1-c843-49fa-984d-19260e9d4f6b",
+              "name": "endHour",
+              "value": "={{ ($json.workday && $json.workday.endHour) || 18 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        1536
+      ],
+      "id": "9ccc8839-a832-4f98-94cc-d60c3f1be5cc",
+      "name": "ConfigForOne"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cd5b085c-7436-46fb-8bd5-aa0d52e965d2",
+              "name": "timezone",
+              "value": "={{ $json.timezone || 'Europe/London' }}",
+              "type": "string"
+            },
+            {
+              "id": "ff51dc5e-3094-4db9-aa39-7da0987cc3c8",
+              "name": "slotMinutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "091d9d63-9f47-446e-9798-2d871e74ba81",
+              "name": "stepMinutes",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "ee4c98c6-2117-4228-9756-a6c1abc6c7ee",
+              "name": "bufferBeforeMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "2ffc85a8-aeb9-440b-b8dc-1102746abef3",
+              "name": "bufferAfterMinutes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "cac063a9-6a5e-40e2-bc97-25e7f720c4f0",
+              "name": "calendarIds",
+              "value": "=[\"demo@clobase.com\"]",
+              "type": "array"
+            },
+            {
+              "id": "448b1372-b153-4a4b-b761-9019f5b41add",
+              "name": "windowStart",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,                              // <-- read from body\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.startHour ?? 10), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "56ec02c4-69d8-4697-8229-5f2fc3cd0615",
+              "name": "windowEnd",
+              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.endHour ?? 19), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "143b7abf-f257-4d34-8b64-59a8f003cc42",
+              "name": "startHour",
+              "value": "={{ ($json.workday && $json.workday.startHour) || 9 }}",
+              "type": "number"
+            },
+            {
+              "id": "bf63f4f1-c843-49fa-984d-19260e9d4f6b",
+              "name": "endHour",
+              "value": "={{ ($json.workday && $json.workday.endHour) || 18 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        1360
+      ],
+      "id": "2f1c8b66-6e0a-4fb9-b23d-a43ec154f3a7",
+      "name": "ConfigForTwo"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  timeMin: $node[\"ConfigForOne\"].json.windowStart,\n  timeMax: $node[\"ConfigForOne\"].json.windowEnd,\n  timeZone: $node[\"ConfigForOne\"].json.timezone,\n  items: $node[\"ConfigForOne\"].json.calendarIds.map(id => ({ id }))\n}) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        1520
+      ],
+      "id": "929efcc1-9ad9-4cdf-a2d3-e9cb15b500f3",
+      "name": "FreeBusy1",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bCgeKmyn9b1BZgTp",
+          "name": "Unnamed credential"
+        },
+        "googleOAuth2Api": {
+          "id": "jMGCrDX8pBYUuzg2",
+          "name": "Google account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "pickFirstSlot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getAllSlotsForTheDay": {
+      "main": [
+        [
+          {
+            "node": "pickFirstSlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FreeBusy": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "getAllSlotsForTheDay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "think": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "booking_agent": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getAvailability1": {
+      "ai_tool": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SessionRev": {
+      "main": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat": {
+      "main": [
+        [
+          {
+            "node": "SessionRev",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "simple-memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "booking_agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "ConfigForTwo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ConfigForOne",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getFreeSlotsTest": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ConfigForOne": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FreeBusy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ConfigForTwo": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FreeBusy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FreeBusy1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "03fd3ed6-b736-425e-86d9-435b5ac550a8",
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2025-11-02T09:58:16.115Z",
+      "createdAt": "2025-11-02T09:58:16.115Z",
+      "role": "workflow:owner",
+      "workflowId": "JDVxCb3dqJHRRowU",
+      "projectId": "hCK0QmXlaDJnMyP5"
+    }
+  ],
+  "tags": []
+}
