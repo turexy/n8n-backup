@@ -1,0 +1,243 @@
+{
+  "updatedAt": "2025-11-13T11:43:18.000Z",
+  "createdAt": "2025-11-13T09:53:46.411Z",
+  "id": "JY7QFGJmkftp3GHl",
+  "name": "My workflow 8",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        -48
+      ],
+      "id": "1e541f06-d757-4c12-b04a-fab5fb476f42",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ed0bae52-5d16-45fa-82f8-0c27a5e96265",
+              "name": "start",
+              "value": "2025-11-13T12:30:00",
+              "type": "string"
+            },
+            {
+              "id": "9e9cbde4-6d6f-4fee-b02c-218b95aa7265",
+              "name": "end",
+              "value": "2025-11-13T13:00:00",
+              "type": "string"
+            },
+            {
+              "id": "f106bdf5-3a62-42eb-8757-9d525842d12d",
+              "name": "name",
+              "value": "Raf",
+              "type": "string"
+            },
+            {
+              "id": "494e1dd6-c1b2-405a-b0f3-6e7e76f60ebc",
+              "name": "title",
+              "value": "Your Haircut Appointment",
+              "type": "string"
+            },
+            {
+              "id": "8848cf3f-849c-49e5-885e-18f07462e1e3",
+              "name": "description",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "88955c5f-8605-4571-ac5b-ebc4f6aa535c",
+              "name": "location",
+              "value": "Short, Back & Vibe",
+              "type": "string"
+            },
+            {
+              "id": "a402c139-7acc-4417-9d12-d26bcf539084",
+              "name": "customerPhone",
+              "value": "447855769628",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -144,
+        -48
+      ],
+      "id": "2cda0497-ec24-413f-ba42-250af0fc4205",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of items) {\n  if (item.binary && item.binary.data) {\n    // Force WhatsApp-friendly MIME type\n    item.binary.data.mimeType = 'text/plain';\n\n    // Keep .ics so phones recognize it as calendar\n    if (!item.binary.data.fileName || !item.binary.data.fileName.endsWith('.ics')) {\n      item.binary.data.fileName = 'appointment.ics';\n    }\n  }\n}\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -48
+      ],
+      "id": "da67e02e-83c3-44a3-96b8-b3338d186360",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "iCal",
+        "title": "={{ $json.title }}",
+        "start": "={{ $json.start + 'Z' }}",
+        "end": "={{ $json.end + 'Z' }}",
+        "additionalFields": {
+          "location": "={{ $json.location }}",
+          "useWorkflowTimezone": true
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        -48
+      ],
+      "id": "43b1b581-8a9a-4486-a13c-7a4d92470057",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/859934767194595/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Edit Fields').item.json.customerPhone }}\",\n  \"type\": \"document\",\n  \"document\": {\n    \"id\": \"{{ $json.id }}\",\n    \"filename\": \"appointment.ics\",\n    \"caption\": \"Here’s your booking – tap to add it to your calendar 📅\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        608,
+        -48
+      ],
+      "id": "be870b55-638c-4cb2-9291-ce26c2283427",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "HXETLp6GAGpSIYNu",
+          "name": "MetaSystemAdmin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "media",
+        "phoneNumberId": "859934767194595",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        -48
+      ],
+      "id": "410f8710-2fdf-459c-9d5c-cc7117250a39",
+      "name": "Upload media",
+      "webhookId": "d9b66257-a2f6-4638-b8a8-4e0dd097b28e",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "0YTF49b8d0TZKWcy",
+          "name": "WhatsApp reply 07304 494554"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Upload media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Upload media": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "e262b192-3a8d-4ad9-b80b-eaeb3332c354",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-11-13T09:53:46.415Z",
+      "createdAt": "2025-11-13T09:53:46.415Z",
+      "role": "workflow:owner",
+      "workflowId": "JY7QFGJmkftp3GHl",
+      "projectId": "hCK0QmXlaDJnMyP5"
+    }
+  ],
+  "tags": []
+}
