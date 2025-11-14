@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2025-11-14T17:19:04.000Z",
+  "updatedAt": "2025-11-14T18:00:02.000Z",
   "createdAt": "2025-10-26T15:45:51.721Z",
   "id": "C5EyK6MaMgvzlO7h",
   "name": "WhatsApp Phonebook Reminders (Michal Dev) tralala",
@@ -123,139 +123,6 @@
     },
     {
       "parameters": {
-        "jsCode": "// Input expected on $json:\n// { slots: [ {startZ:\"...\", endZ:\"...\"}, ... ], timezone: \"Europe/London\" }\n\nconst slots = Array.isArray($json.slots) ? $json.slots.slice() : [];\nconst tz = $json.timezone || 'Europe/London';\n\n// nothing to do\nif (!slots.length) {\n  return [{ json: { available: false, reason: 'no_slots_for_day' } }];\n}\n\n// sort by start time (UTC)\nslots.sort((a, b) => new Date(a.startZ) - new Date(b.startZ));\n\n// helper: local hour in given zone\nfunction localHour(iso, zone) {\n  return Number(new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso)));\n}\n\n// helper: build local ISO like 2025-09-01T09:30:00 (no offset, use with timeZone later)\nfunction toLocalISO(iso, zone) {\n  const d = new Date(iso);\n  const datePart = new Intl.DateTimeFormat('en-CA', { // en-CA => YYYY-MM-DD\n    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(d);\n  const timePart = new Intl.DateTimeFormat('en-GB', {\n    timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,\n  }).format(d);\n  return `${datePart}T${timePart}`;\n}\n\n// split into AM (<12) and PM (>=12) by local start time\nconst am = [];\nconst pm = [];\nfor (const s of slots) {\n  const h = localHour(s.startZ, tz);\n  (h < 12 ? am : pm).push(s);\n}\n\n// choose up to two AM and two PM slots\nconst chosen = [...am.slice(0, 4), ...pm.slice(0, 4)];\n\n// if still nothing, return unavailable\nif (!chosen.length) {\n  return [{ json: { available: false, reason: 'no_slots_after_filters' } }];\n}\n\n// enrich with local times for direct use in Calendar (local dt + separate timeZone)\nconst proposals = chosen.map(s => ({\n  ...s,\n  startLocal: toLocalISO(s.startZ, tz),\n  endLocal:   toLocalISO(s.endZ,   tz),\n  timezone:   tz,\n}));\n\nreturn [{\n  json: {\n    available: true,\n    selectedSlots: proposals,      // up to 4 items (2 AM + 2 PM)\n    counts: { am: am.length, pm: pm.length }\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -1872,
-        512
-      ],
-      "id": "9b69b574-0a0f-4614-8ccd-e61536204e1c",
-      "name": "pickFirstSlot"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Expect TWO upstream items: one \"config\" (windowStart/windowEnd/slotMinutes/stepMinutes/...)\n// and one \"freebusy\" (calendars: { <id>: { busy: [{start,end},...] } })\n\n// 1) Find config + freebusy items\nlet cfg = null, fb = null;\nfor (const it of items) {\n  const j = it.json || {};\n  if (!cfg && j.windowStart && j.windowEnd) cfg = j;\n  if (!fb && j.calendars) fb = j;\n}\nif (!cfg) throw new Error(\"Config item missing windowStart/windowEnd\");\nif (!fb || !fb.calendars) throw new Error(\"FreeBusy item missing calendars\");\n\n// helpers\nfunction toMs(iso){ const t = Date.parse(iso); if (Number.isNaN(t)) throw new Error(\"Bad ISO: \"+iso); return t; }\nfunction localHM(iso, zone) {\n  const s = new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone,\n  }).format(new Date(iso));\n  const [h,m] = s.split(':').map(Number);\n  return h*60 + m;\n}\nfunction localWeekday(iso, zone) {\n  return new Intl.DateTimeFormat('en-GB', { weekday: 'long', timeZone: zone })\n    .format(new Date(iso)); // e.g. \"Tuesday\"\n}\n\n// Map business hours (minutes since midnight). null => closed.\nfunction getBusinessWindow(weekday) {\n  switch (weekday) {\n    case 'Monday':    return null;                  // closed\n    case 'Tuesday':\n    case 'Wednesday': return { open: 10*60, close: 19*60 }; // 10:00–19:00\n    case 'Thursday':\n    case 'Friday':    return { open: 10*60, close: 20*60 }; // 10:00–20:00\n    case 'Saturday':  return { open: 10*60, close: 18*60 }; // 10:00–18:00\n    case 'Sunday':    return { open: 11*60, close: 16*60 }; // 11:00–16:00\n    default:          return null;\n  }\n}\n\n// 2) Read config\nconst tz          = cfg.timezone || 'Europe/London';\nconst windowStart = toMs(cfg.windowStart);\nconst windowEnd   = toMs(cfg.windowEnd);\nconst slotMs      = (Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst stepMs      = (Number(cfg.stepMinutes) || Number(cfg.slotMinutes) || 30) * 60 * 1000;\nconst bufBeforeMs = (Number(cfg.bufferBeforeMinutes) || 0) * 60 * 1000;\nconst bufAfterMs  = (Number(cfg.bufferAfterMinutes)  || 0) * 60 * 1000;\n\n// 3) Collect busy intervals across all calendars\nlet intervals = [];\nfor (const [id, cal] of Object.entries(fb.calendars)) {\n  if (!cal || (cal.errors && cal.errors.length)) continue;\n  const busy = Array.isArray(cal.busy) ? cal.busy : [];\n  for (const b of busy) {\n    let s = toMs(b.start) - bufBeforeMs;\n    let e = toMs(b.end)   + bufAfterMs;\n    if (e <= windowStart || s >= windowEnd) continue;   // outside day window\n    if (s < windowStart) s = windowStart;\n    if (e > windowEnd)   e = windowEnd;\n    intervals.push([s, e]);\n  }\n}\nintervals.sort((a,b) => a[0] - b[0]);\n\n// 4) Merge overlaps\nconst merged = [];\nfor (const iv of intervals) {\n  if (!merged.length || iv[0] > merged[merged.length-1][1]) merged.push([iv[0], iv[1]]);\n  else if (iv[1] > merged[merged.length-1][1]) merged[merged.length-1][1] = iv[1];\n}\n\n// 5) Free ranges = window - merged busy\nconst freeRanges = [];\nlet cursor = windowStart;\nfor (const [s,e] of merged) {\n  if (cursor < s) freeRanges.push([cursor, s]);\n  if (e > cursor) cursor = e;\n}\nif (cursor < windowEnd) freeRanges.push([cursor, windowEnd]);\n\n// 6) Slice free ranges into slots (UTC) — enforce \"no past\" and \">= now + 1h\"\nfunction ceilToStep(t){ const r = (t - windowStart) % stepMs; return r === 0 ? t : t + (stepMs - r); }\nconst nowMs = Date.now();\nconst minStart = Math.max(windowStart, nowMs + 60 * 60 * 1000); // >= current time + 1h\n\nlet slots = [];\nfor (const [fs,fe] of freeRanges) {\n  const effectiveStart = Math.max(fs, minStart);\n  if (effectiveStart >= fe) continue;\n\n  let t = ceilToStep(effectiveStart);\n  while (t + slotMs <= fe) {\n    slots.push({\n      startZ: new Date(t).toISOString(),\n      endZ:   new Date(t + slotMs).toISOString()\n    });\n    t += stepMs;\n  }\n}\n\n// 7) FILTER to business hours for the day (in tz)\nconst weekday = localWeekday(cfg.windowStart, tz);\nconst biz = getBusinessWindow(weekday);\n\n// If closed, wipe slots.\nif (!biz) slots = [];\nelse {\n  slots = slots.filter(s => {\n    const startHM = localHM(s.startZ, tz);\n    const endHM   = localHM(s.endZ,   tz);\n    return startHM >= biz.open && endHM <= biz.close;\n  });\n}\n\n// 8) Output (plus some debug)\nconst toZ = ([s,e]) => ({ startZ: new Date(s).toISOString(), endZ: new Date(e).toISOString() });\n\nreturn [{\n  json: {\n    slots,\n    debug: {\n      timezone: tz,\n      weekday,\n      businessWindowMinutes: biz || null,\n      windowStartZ: new Date(windowStart).toISOString(),\n      windowEndZ:   new Date(windowEnd).toISOString(),\n      mergedBusy:   merged.map(toZ),\n      freeRanges:   freeRanges.map(toZ),\n      minStartZ:    new Date(minStart).toISOString(),\n    }\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -2096,
-        512
-      ],
-      "id": "4557c4d3-d2de-4698-998a-14a7c16e7c50",
-      "name": "getAllSlotsForTheDay"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  timeMin: $node[\"Config\"].json.windowStart,\n  timeMax: $node[\"Config\"].json.windowEnd,\n  timeZone: $node[\"Config\"].json.timezone,\n  items: $node[\"Config\"].json.calendarIds.map(id => ({ id }))\n}) }}\n",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -2544,
-        592
-      ],
-      "id": "6c2fef44-dec8-4139-8df1-f2c4ceed8985",
-      "name": "FreeBusy",
-      "credentials": {
-        "oAuth2Api": {
-          "id": "bCgeKmyn9b1BZgTp",
-          "name": "Unnamed credential"
-        },
-        "googleOAuth2Api": {
-          "id": "jMGCrDX8pBYUuzg2",
-          "name": "Google account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "cd5b085c-7436-46fb-8bd5-aa0d52e965d2",
-              "name": "timezone",
-              "value": "={{ $json.timezone || 'Europe/London' }}",
-              "type": "string"
-            },
-            {
-              "id": "ff51dc5e-3094-4db9-aa39-7da0987cc3c8",
-              "name": "slotMinutes",
-              "value": 30,
-              "type": "number"
-            },
-            {
-              "id": "091d9d63-9f47-446e-9798-2d871e74ba81",
-              "name": "stepMinutes",
-              "value": 30,
-              "type": "number"
-            },
-            {
-              "id": "ee4c98c6-2117-4228-9756-a6c1abc6c7ee",
-              "name": "bufferBeforeMinutes",
-              "value": 0,
-              "type": "number"
-            },
-            {
-              "id": "2ffc85a8-aeb9-440b-b8dc-1102746abef3",
-              "name": "bufferAfterMinutes",
-              "value": 0,
-              "type": "number"
-            },
-            {
-              "id": "cac063a9-6a5e-40e2-bc97-25e7f720c4f0",
-              "name": "calendarIds",
-              "value": "=[\"demo@clobase.com\"]",
-              "type": "array"
-            },
-            {
-              "id": "448b1372-b153-4a4b-b761-9019f5b41add",
-              "name": "windowStart",
-              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,                              // <-- read from body\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.startHour ?? 10), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
-              "type": "string"
-            },
-            {
-              "id": "56ec02c4-69d8-4697-8229-5f2fc3cd0615",
-              "name": "windowEnd",
-              "value": "={{ DateTime.fromISO(\n      $json.body?.timestamp,\n      { zone: $json.body?.timezone || 'Europe/London' }\n    )\n    .set({ hour: ($json.body?.workday?.endHour ?? 19), minute: 0, second: 0, millisecond: 0 })\n    .toISO() }}",
-              "type": "string"
-            },
-            {
-              "id": "143b7abf-f257-4d34-8b64-59a8f003cc42",
-              "name": "startHour",
-              "value": "={{ ($json.workday && $json.workday.startHour) || 9 }}",
-              "type": "number"
-            },
-            {
-              "id": "bf63f4f1-c843-49fa-984d-19260e9d4f6b",
-              "name": "endHour",
-              "value": "={{ ($json.workday && $json.workday.endHour) || 18 }}",
-              "type": "number"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        -2768,
-        496
-      ],
-      "id": "a9609abf-2678-4011-bf65-7581aa285ecf",
-      "name": "Config"
-    },
-    {
-      "parameters": {
         "content": "## Get Available Slots",
         "height": 624,
         "width": 1936,
@@ -269,55 +136,6 @@
       ],
       "id": "33518a79-ede2-4ee7-8c95-8b634a488c79",
       "name": "Sticky Note1"
-    },
-    {
-      "parameters": {
-        "mode": "combine",
-        "advanced": true,
-        "mergeByFields": {
-          "values": [
-            {
-              "field1": "config",
-              "field2": "FreeBusy"
-            }
-          ]
-        },
-        "joinMode": "keepNonMatches",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [
-        -2320,
-        512
-      ],
-      "id": "2bfab729-abfc-419c-84a3-19af66f0ca8c",
-      "name": "Merge1"
-    },
-    {
-      "parameters": {
-        "respondWith": "text",
-        "responseBody": "={{ JSON.stringify({\n  availableSlots: ($json.selectedSlots || []).map(s => s.startLocal),\n  timezone: ($json.selectedSlots && $json.selectedSlots.length > 0)\n    ? $json.selectedSlots[0].timezone\n    : ($json.timezone || 'UTC')\n}) }}",
-        "options": {
-          "responseCode": 200,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
-          }
-        }
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.4,
-      "position": [
-        -1648,
-        512
-      ],
-      "id": "b2270d93-ed5d-4c2f-a3d7-1e55cea2f8f0",
-      "name": "Respond to Webhook1"
     },
     {
       "parameters": {
@@ -701,23 +519,6 @@
       ],
       "id": "f6b414c5-61b2-4689-8bcd-d3e0f45ba713",
       "name": "getAvailability"
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "70934dce-1784-4a1d-898d-23ba55fef95d",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        -2992,
-        496
-      ],
-      "id": "df75582f-10e5-4662-9aed-b48b0cb373f4",
-      "name": "getFreeSlots",
-      "webhookId": "70934dce-1784-4a1d-898d-23ba55fef95d"
     },
     {
       "parameters": {
@@ -1272,66 +1073,6 @@
         ]
       ]
     },
-    "pickFirstSlot": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "getAllSlotsForTheDay": {
-      "main": [
-        [
-          {
-            "node": "pickFirstSlot",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FreeBusy": {
-      "main": [
-        [
-          {
-            "node": "Merge1",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Config": {
-      "main": [
-        [
-          {
-            "node": "Merge1",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "FreeBusy",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge1": {
-      "main": [
-        [
-          {
-            "node": "getAllSlotsForTheDay",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Schedule Trigger": {
       "main": [
         [
@@ -1426,17 +1167,6 @@
           {
             "node": "booking_agent",
             "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "getFreeSlots": {
-      "main": [
-        [
-          {
-            "node": "Config",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1660,7 +1390,7 @@
       }
     ]
   },
-  "versionId": "17729849-3fe8-437e-b986-599dfc448f6f",
+  "versionId": "045a80fb-2494-4356-8488-f9ff95bd5229",
   "triggerCount": 5,
   "shared": [
     {
