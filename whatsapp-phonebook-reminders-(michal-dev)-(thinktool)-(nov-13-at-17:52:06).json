@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2025-11-14T19:10:09.000Z",
+  "updatedAt": "2025-11-18T17:12:00.000Z",
   "createdAt": "2025-11-13T18:03:30.544Z",
   "id": "8HfiVR9uf7qGJk94",
   "name": "WhatsApp Phonebook Reminders (Michal Dev) (ThinkTool) (Nov 13 at 17:52:06)",
@@ -644,7 +644,7 @@
     },
     {
       "parameters": {
-        "jsCode": "/***** SETTINGS *****/\nconst TZ = 'Europe/London';\nconst SEND_WINDOW_MIN = 60;   // should be >= your schedule cadence\nconst DRY_RUN = false;        // true = only diagnostics, no messages\n\n/***** HELPERS: TZ math (no external libs) *****/\nfunction tzOffsetMs(tz, dateUtc) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false,\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);\n  return asUtc - dateUtc.getTime();\n}\n\nfunction zonedTimeToUtc(y, m, d, hh, mm, ss, tz) {\n  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm, ss || 0));\n  const off = tzOffsetMs(tz, guess);\n  return guess.getTime() - off;\n}\n\nfunction parseLocalDateTimeToUTCms(str, tz) {\n  if (!str) return null;\n  const s = String(str).trim().replace('T', ' ');\n  // yyyy-mm-dd hh:mm[:ss]\n  const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})(?::(\\d{2}))?$/);\n  if (!m) return null;\n  const [, Y, Mo, D, h, mi, se] = m.map(Number);\n  return zonedTimeToUtc(Y, Mo, D, h, mi, se || 0, tz);\n}\n\nfunction localYMD(dateUtc, tz) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  return { y: +p.year, m: +p.month, d: +p.day };\n}\n\nfunction sameDay8amUtcMs(apptUtcMs, tz) {\n  const { y, m, d } = localYMD(new Date(apptUtcMs), tz);\n  return zonedTimeToUtc(y, m, d, 8, 0, 0, tz);\n}\n\n/***** HELPERS: phone cleaning *****/\nfunction cleanPhone(x) {\n  // Turn anything into digits-only string\n  const digits = String(x ?? '').match(/\\d+/g)?.join('') || '';\n  console.log(digits);\n  if (!digits) return ''; // will fail fast downstream if empty\n  // If UK and number doesn't start with 44, add it (strip leading 0s)\n  \n  const withCc = digits;\n  return withCc; // WhatsApp BC accepts digits-only (E.164 without '+')\n}\n\n/***** NOW & FORMATTING *****/\nconst nowMs = Date.now();\nconst windowStartMs = nowMs - SEND_WINDOW_MIN * 60 * 1000;\nconst windowEndMs   = nowMs + 60 * 1000; // small lookahead\nconst dateFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: TZ, dateStyle: 'medium', timeStyle: 'short', hour12: false\n});\nconst isoUtc = (ms) => new Date(ms).toISOString();\n\n/***** PROCESS ROWS *****/\nconst out = [];\n\nfor (const item of items) {\n  const r = item.json;\n\n  // Expected headers in your \"October\" sheet:\n  // Name | Number | Request Date | Appointment | Service | Paid | Client ID\n  const name     = r['Name'] || '';\n  const rawPhone = r['Number'];\n  const apptStr  = r['Appointment'];   // \"YYYY-MM-DD HH:MM[:SS]\" or \"YYYY-MM-DDTHH:MM[:SS]\"\n  const service  = r['Service'] || '';\n  const clientId = r['Client ID'] || '';\n\n  if (!apptStr || !rawPhone) continue;\n\n  const apptMs = parseLocalDateTimeToUTCms(apptStr, TZ);\n  if (!apptMs) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad date format', apptStr } });\n    continue;\n  }\n\n  const to = cleanPhone(rawPhone);\n  if (!to) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad phone', rawPhone } });\n    continue;\n  }\n\n  const sendAt08Ms = sameDay8amUtcMs(apptMs, TZ);\n  const sendAt1hMs = apptMs - 60 * 60 * 1000;\n  const inWindow = (t) => t >= windowStartMs && t <= windowEndMs;\n\n  if (DRY_RUN) {\n    out.push({\n      json: {\n        diagnostics: true,\n        name, clientId, service, to,\n        nowUtc: isoUtc(nowMs),\n        apptLocal: dateFmt.format(new Date(apptMs)),\n        sendAt08_local: dateFmt.format(new Date(sendAt08Ms)),\n        sendAt08_utc: isoUtc(sendAt08Ms),\n        sendAt1h_local: dateFmt.format(new Date(sendAt1hMs)),\n        sendAt1h_utc: isoUtc(sendAt1hMs),\n        windowStartUtc: isoUtc(windowStartMs),\n        windowEndUtc: isoUtc(windowEndMs),\n        shouldSend08: inWindow(sendAt08Ms),\n        shouldSend1h: inWindow(sendAt1hMs),\n      }\n    });\n    continue;\n  }\n\n  // 08:00 morning reminder\n  if (inWindow(sendAt08Ms)) {\n    out.push({\n      json: {\n        to, name, clientId, type: '08am',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Good morning ${name || ''}! Reminder: your appointment is today at ${dateFmt.format(new Date(apptMs))}. Service: ${service || '—'}. Phone Max on 07765 918355 if you need to re-schedule.`\n      }\n    });\n  }\n\n  // 1-hour-before reminder\n  if (inWindow(sendAt1hMs)) {\n    const timeOnlyFmt = new Intl.DateTimeFormat('en-GB', {\n      timeZone: TZ,\n      hour: '2-digit',\n      minute: '2-digit',\n      hour12: false\n    });\n\n    out.push({\n      json: {\n        to, name, clientId, type: '1h-before',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Hi ${name || ''}, quick reminder: your appointment is in 1 hour (${timeOnlyFmt.format(new Date(apptMs))}). See you soon!`\n      }\n    });\n  }\n}\n\nreturn out;"
+        "jsCode": "/***** SETTINGS *****/\nconst TZ = 'Europe/London';\nconst SEND_WINDOW_MIN = 30;   // should be >= your schedule cadence\nconst DRY_RUN = false;        // true = only diagnostics, no messages\n\n/***** HELPERS: TZ math (no external libs) *****/\nfunction tzOffsetMs(tz, dateUtc) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false,\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);\n  return asUtc - dateUtc.getTime();\n}\n\nfunction zonedTimeToUtc(y, m, d, hh, mm, ss, tz) {\n  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm, ss || 0));\n  const off = tzOffsetMs(tz, guess);\n  return guess.getTime() - off;\n}\n\nfunction parseLocalDateTimeToUTCms(str, tz) {\n  if (!str) return null;\n  const s = String(str).trim().replace('T', ' ');\n  // yyyy-mm-dd hh:mm[:ss]\n  const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})(?::(\\d{2}))?$/);\n  if (!m) return null;\n  const [, Y, Mo, D, h, mi, se] = m.map(Number);\n  return zonedTimeToUtc(Y, Mo, D, h, mi, se || 0, tz);\n}\n\nfunction localYMD(dateUtc, tz) {\n  const dtf = new Intl.DateTimeFormat('en-GB', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit'\n  });\n  const p = Object.fromEntries(dtf.formatToParts(dateUtc).map(({type, value}) => [type, value]));\n  return { y: +p.year, m: +p.month, d: +p.day };\n}\n\nfunction sameDay8amUtcMs(apptUtcMs, tz) {\n  const { y, m, d } = localYMD(new Date(apptUtcMs), tz);\n  return zonedTimeToUtc(y, m, d, 8, 0, 0, tz);\n}\n\n/***** HELPERS: phone cleaning *****/\nfunction cleanPhone(x) {\n  // Turn anything into digits-only string\n  const digits = String(x ?? '').match(/\\d+/g)?.join('') || '';\n  console.log(digits);\n  if (!digits) return ''; // will fail fast downstream if empty\n  // If UK and number doesn't start with 44, add it (strip leading 0s)\n  \n  const withCc = digits;\n  return withCc; // WhatsApp BC accepts digits-only (E.164 without '+')\n}\n\n/***** NOW & FORMATTING *****/\nconst nowMs = Date.now();\nconst windowStartMs = nowMs - SEND_WINDOW_MIN * 60 * 1000;\nconst windowEndMs   = nowMs + 60 * 1000; // small lookahead\nconst dateFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: TZ, dateStyle: 'medium', timeStyle: 'short', hour12: false\n});\nconst isoUtc = (ms) => new Date(ms).toISOString();\n\n/***** PROCESS ROWS *****/\nconst out = [];\n\nfor (const item of items) {\n  const r = item.json;\n\n  // Expected headers in your \"October\" sheet:\n  // Name | Number | Request Date | Appointment | Service | Paid | Client ID\n  const name     = r['Name'] || '';\n  const rawPhone = r['Number'];\n  const apptStr  = r['Appointment'];   // \"YYYY-MM-DD HH:MM[:SS]\" or \"YYYY-MM-DDTHH:MM[:SS]\"\n  const service  = r['Service'] || '';\n  const clientId = r['Client ID'] || '';\n\n  if (!apptStr || !rawPhone) continue;\n\n  const apptMs = parseLocalDateTimeToUTCms(apptStr, TZ);\n  if (!apptMs) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad date format', apptStr } });\n    continue;\n  }\n\n  const to = cleanPhone(rawPhone);\n  if (!to) {\n    if (DRY_RUN) out.push({ json: { diagnostics: true, reason: 'Bad phone', rawPhone } });\n    continue;\n  }\n\n  const sendAt08Ms = sameDay8amUtcMs(apptMs, TZ);\n  const sendAt1hMs = apptMs - 60 * 60 * 1000;\n  const inWindow = (t) => t >= windowStartMs && t <= windowEndMs;\n\n  if (DRY_RUN) {\n    out.push({\n      json: {\n        diagnostics: true,\n        name, clientId, service, to,\n        nowUtc: isoUtc(nowMs),\n        apptLocal: dateFmt.format(new Date(apptMs)),\n        sendAt08_local: dateFmt.format(new Date(sendAt08Ms)),\n        sendAt08_utc: isoUtc(sendAt08Ms),\n        sendAt1h_local: dateFmt.format(new Date(sendAt1hMs)),\n        sendAt1h_utc: isoUtc(sendAt1hMs),\n        windowStartUtc: isoUtc(windowStartMs),\n        windowEndUtc: isoUtc(windowEndMs),\n        shouldSend08: inWindow(sendAt08Ms),\n        shouldSend1h: inWindow(sendAt1hMs),\n      }\n    });\n    continue;\n  }\n\n  // 08:00 morning reminder\n  if (inWindow(sendAt08Ms)) {\n    out.push({\n      json: {\n        to, name, clientId, type: '08am',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Good morning ${name || ''}! Reminder: your appointment is today at ${dateFmt.format(new Date(apptMs))}. Service: ${service || '—'}. Phone Max on 07765 918355 if you need to re-schedule.`\n      }\n    });\n  }\n\n  // 1-hour-before reminder\n  if (inWindow(sendAt1hMs)) {\n    const timeOnlyFmt = new Intl.DateTimeFormat('en-GB', {\n      timeZone: TZ,\n      hour: '2-digit',\n      minute: '2-digit',\n      hour12: false\n    });\n\n    out.push({\n      json: {\n        to, name, clientId, type: '1h-before',\n        appointmentLocal: dateFmt.format(new Date(apptMs)),\n        service,\n        body: `Hi ${name || ''}, quick reminder: your appointment is in 1 hour (${timeOnlyFmt.format(new Date(apptMs))}). See you soon!`\n      }\n    });\n  }\n}\n\nreturn out;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -931,7 +931,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 7-19 * * 2-7"
+              "expression": "0,30 7-19 * * 2-7"
             }
           ]
         }
@@ -944,32 +944,6 @@
       ],
       "id": "e6d607c2-84ea-4213-9d36-7dfd6f0f70de",
       "name": "remindersTrigger"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://graph.facebook.com/v22.0/{{ $('WhatsApp Trigger').item.json.metadata.phone_number_id }}/messages",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"status\": \"read\",\n  \"message_id\": \"{{ $('WhatsApp Trigger').item.json.messages[0].id }}\",\n  \"typing_indicator\": {\n    \"type\": \"text\"\n  }\n}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.3,
-      "position": [
-        928,
-        -16
-      ],
-      "id": "5ede505c-a9cc-4aaa-b480-a9ed6db8f6b2",
-      "name": "typingIndicator",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "HXETLp6GAGpSIYNu",
-          "name": "MetaSystemAdmin"
-        }
-      }
     }
   ],
   "connections": {
@@ -1259,11 +1233,6 @@
           }
         ]
       ]
-    },
-    "typingIndicator": {
-      "ai_tool": [
-        []
-      ]
     }
   },
   "settings": {
@@ -1320,7 +1289,7 @@
       }
     ]
   },
-  "versionId": "b0314e75-0ed2-4ad2-a886-ddd18723a1d9",
+  "versionId": "0d4f6990-fb75-46ae-8a8f-77d6ae203f0b",
   "triggerCount": 3,
   "shared": [
     {
